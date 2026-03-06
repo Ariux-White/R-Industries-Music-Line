@@ -1,11 +1,9 @@
-# R-Industries Engine v2.0 - Core Intelligence
 from fastapi import FastAPI
-from mangum import Mangum
 from ytmusicapi import YTMusic
 import yt_dlp
 
+# We define the app, but we don't use Mangum here for Vercel's latest runtime
 app = FastAPI()
-handler = Mangum(app)
 yt = YTMusic()
 
 @app.get("/api/search")
@@ -39,3 +37,6 @@ def get_stream(video_id: str):
             return {"url": info['url'], "title": info['title']}
     except Exception as e:
         return {"error": str(e)}
+
+# IMPORTANT: Vercel's Python runtime looks for 'app' at the module level
+# We don't need 'handler = Mangum(app)' anymore.
