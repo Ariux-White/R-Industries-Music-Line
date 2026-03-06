@@ -1,0 +1,5 @@
+{
+    "discord.enabled": true,
+    "discord.removeDetails": false,
+    "discord.removeLowerDetails": false
+}
