@@ -78,7 +78,7 @@ export default function Home() {
   const lastBroadcastTime = useRef(0);
 
   const isAdmin = profile?.role?.toLowerCase()?.trim() === 'admin';
-  const getApiUrl = () => 'http://127.0.0.1:8000';
+  const getApiUrl = () => 'https://r-music-engine.onrender.com';
 
   useEffect(() => {
     const fetchSession = async () => {
