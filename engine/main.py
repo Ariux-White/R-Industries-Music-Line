@@ -5,10 +5,16 @@ import yt_dlp
 
 app = FastAPI()
 
-# This allows your Next.js app to talk to this Python app securely
+# THE CORS FIX: We explicitly whitelist your Vercel site so it doesn't get blocked.
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://r-industries-music-line.vercel.app/"  # <--- REPLACE THIS WITH YOUR REAL VERCEL LINK
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, we'd lock this down to your Vercel URL
+    allow_origins=origins, 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
