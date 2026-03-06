@@ -78,8 +78,8 @@ export default function Home() {
   const lastBroadcastTime = useRef(0);
 
   const isAdmin = profile?.role?.toLowerCase()?.trim() === 'admin';
-  const getApiUrl = () => '';
-  
+  const getApiUrl = () => '/api';
+
   useEffect(() => {
     const fetchSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
