@@ -78,7 +78,7 @@ export default function Home() {
   const lastBroadcastTime = useRef(0);
 
   const isAdmin = profile?.role?.toLowerCase()?.trim() === 'admin';
-  const getApiUrl = () => 'https://r-music-engine.onrender.com';
+  const getApiUrl = () => 'https://ariuxwhite-r-music-engine.hf.space';
 
   useEffect(() => {
     const fetchSession = async () => {
