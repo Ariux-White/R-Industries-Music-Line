@@ -1,8 +1,10 @@
 from fastapi import FastAPI
+from mangum import Mangum
 from ytmusicapi import YTMusic
 import yt_dlp
 
 app = FastAPI()
+handler = Mangum(app)
 yt = YTMusic()
 
 @app.get("/api/search")
