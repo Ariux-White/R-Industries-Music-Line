@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from ytmusicapi import YTMusic
 import yt_dlp
 
-# We define the app, but we don't use Mangum here for Vercel's latest runtime
 app = FastAPI()
 yt = YTMusic()
 
@@ -25,11 +24,23 @@ def search_music(query: str):
 
 @app.get("/api/stream")
 def get_stream(video_id: str):
+    # This setup spoofs an iOS device to bypass the "Bot" check
     ydl_opts = {
         'format': 'bestaudio/best',
         'quiet': True,
         'nocheckcertificate': True,
-        'addheader': [('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')],
+        'no_warnings': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['ios'],
+                'skip': ['dash', 'hls']
+            }
+        },
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-us',
+        }
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -38,5 +49,20 @@ def get_stream(video_id: str):
     except Exception as e:
         return {"error": str(e)}
 
-# IMPORTANT: Vercel's Python runtime looks for 'app' at the module level
-# We don't need 'handler = Mangum(app)' anymore.
+@app.get("/api/radio")
+def get_radio(video_id: str):
+    try:
+        # Get watch playlist (radio) based on the song videoId
+        radio_data = yt.get_watch_playlist(video_id=video_id, limit=10)
+        tracks = []
+        for track in radio_data.get('tracks', []):
+            thumbs = track.get("thumbnails") or []
+            tracks.append({
+                "videoId": track.get("videoId"),
+                "title": track.get("title"),
+                "artists": [a["name"] for a in track.get("artists", [])],
+                "thumbnail": thumbs[-1].get("url", "") if thumbs else ""
+            })
+        return tracks
+    except Exception as e:
+        return {"error": str(e)}
