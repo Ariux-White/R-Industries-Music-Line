@@ -25,28 +25,37 @@ def search_music(query: str):
 
 @app.get("/api/stream")
 def get_stream(video_id: str):
-    try:
-        # Ask the Piped Public API to fetch the audio streams to bypass Vercel's IP ban
-        url = f"https://pipedapi.kavin.rocks/streams/{video_id}"
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        
-        with urllib.request.urlopen(req) as response:
-            data = json.loads(response.read().decode())
-            audio_streams = data.get("audioStreams", [])
+    # An array of public proxy servers to guarantee a connection
+    proxies = [
+        "https://pipedapi.tokhmi.xyz",
+        "https://pipedapi.syncpundit.io",
+        "https://api-piped.mha.fi",
+        "https://pipedapi.kavin.rocks"
+    ]
+    
+    for proxy in proxies:
+        try:
+            url = f"{proxy}/streams/{video_id}"
+            # Add a realistic User-Agent so the proxy doesn't think Vercel is a bot
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
             
-            if audio_streams:
-                # Look for the highly compatible M4A format first
-                for stream in audio_streams:
-                    if stream.get("format") == "M4A":
-                        return {"url": stream["url"], "title": "R-Stream Audio"}
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                audio_streams = data.get("audioStreams", [])
                 
-                # Fallback to the first available audio stream if M4A isn't found
-                return {"url": audio_streams[0]["url"], "title": "R-Stream Audio"}
-            else:
-                return {"error": "No audio streams found via proxy."}
-                
-    except Exception as e:
-        return {"error": str(e)}
+                if audio_streams:
+                    # Prioritize M4A for universal browser compatibility
+                    for stream in audio_streams:
+                        if stream.get("format") == "M4A":
+                            return {"url": stream["url"], "title": "R-Stream Audio"}
+                    
+                    # Fallback to the first available stream
+                    return {"url": audio_streams[0]["url"], "title": "R-Stream Audio"}
+        except Exception:
+            # If this specific proxy fails or times out, seamlessly move to the next one
+            continue
+            
+    return {"error": "All proxy servers failed to retrieve the stream."}
 
 @app.get("/api/radio")
 def get_radio(video_id: str):
