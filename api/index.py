@@ -28,19 +28,22 @@ def get_stream(video_id: str):
     cookie_path = os.path.join(os.path.dirname(__file__), 'cookies.txt')
     
     ydl_opts = {
-        'format': 'bestaudio/best', # Just grab the best available audio, no strict filters
+        'format': 'm4a/bestaudio/best', # Casts the widest net for audio
         'quiet': True,
         'nocheckcertificate': True,
         'no_warnings': True,
         'cookiefile': cookie_path,
-        # SPOOFING REMOVED: This is what triggers the bot block!
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        'extractor_args': {
+            'youtube': {
+                # 'tv' and 'mweb' clients bypass the format-hiding script
+                'player_client': ['tv', 'mweb'] 
+            }
         }
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            # Shift the domain to music.youtube.com to force audio-centric delivery
+            info = ydl.extract_info(f"https://music.youtube.com/watch?v={video_id}", download=False)
             return {"url": info['url'], "title": info['title']}
     except Exception as e:
         return {"error": str(e)}
