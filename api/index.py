@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from ytmusicapi import YTMusic
-import yt_dlp
-import os
+import urllib.request
+import json
 
 app = FastAPI()
 yt = YTMusic()
@@ -25,22 +25,26 @@ def search_music(query: str):
 
 @app.get("/api/stream")
 def get_stream(video_id: str):
-    cookie_path = os.path.join(os.path.dirname(__file__), 'cookies.txt')
-    
-    # Stripped down to the absolute bare minimum. No spoofing.
-    ydl_opts = {
-        'format': 'bestaudio', 
-        'quiet': True,
-        'no_warnings': True,
-        'nocheckcertificate': True,
-        'cookiefile': cookie_path
-    }
-    
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Back to standard youtube.com to prevent 'video unavailable' errors
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            return {"url": info['url'], "title": info['title']}
+        # Ask the Piped Public API to fetch the audio streams to bypass Vercel's IP ban
+        url = f"https://pipedapi.kavin.rocks/streams/{video_id}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode())
+            audio_streams = data.get("audioStreams", [])
+            
+            if audio_streams:
+                # Look for the highly compatible M4A format first
+                for stream in audio_streams:
+                    if stream.get("format") == "M4A":
+                        return {"url": stream["url"], "title": "R-Stream Audio"}
+                
+                # Fallback to the first available audio stream if M4A isn't found
+                return {"url": audio_streams[0]["url"], "title": "R-Stream Audio"}
+            else:
+                return {"error": "No audio streams found via proxy."}
+                
     except Exception as e:
         return {"error": str(e)}
 
