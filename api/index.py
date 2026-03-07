@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from ytmusicapi import YTMusic
 import yt_dlp
+import os
 
 app = FastAPI()
 yt = YTMusic()
@@ -24,22 +25,19 @@ def search_music(query: str):
 
 @app.get("/api/stream")
 def get_stream(video_id: str):
-    # This setup spoofs an iOS device to bypass the "Bot" check
+    # Locate the VIP pass (cookies.txt) inside the api folder
+    cookie_path = os.path.join(os.path.dirname(__file__), 'cookies.txt')
+    
     ydl_opts = {
         'format': 'bestaudio/best',
         'quiet': True,
         'nocheckcertificate': True,
         'no_warnings': True,
+        'cookiefile': cookie_path,  # <-- The Magic Key to bypass the bot check
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios'],
-                'skip': ['dash', 'hls']
+                'player_client': ['android', 'web']
             }
-        },
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us',
         }
     }
     try:
@@ -52,7 +50,6 @@ def get_stream(video_id: str):
 @app.get("/api/radio")
 def get_radio(video_id: str):
     try:
-        # Get watch playlist (radio) based on the song videoId
         radio_data = yt.get_watch_playlist(video_id=video_id, limit=10)
         tracks = []
         for track in radio_data.get('tracks', []):
