@@ -25,19 +25,17 @@ def search_music(query: str):
 
 @app.get("/api/stream")
 def get_stream(video_id: str):
-    # Locate the VIP pass (cookies.txt) inside the api folder
     cookie_path = os.path.join(os.path.dirname(__file__), 'cookies.txt')
     
     ydl_opts = {
-        'format': '140/bestaudio/best', # 140 is YouTube's native, highly compatible m4a format
+        'format': 'bestaudio/best', # Just grab the best available audio, no strict filters
         'quiet': True,
         'nocheckcertificate': True,
         'no_warnings': True,
         'cookiefile': cookie_path,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'web'] # Brings back the mobile format access
-            }
+        # SPOOFING REMOVED: This is what triggers the bot block!
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
         }
     }
     try:
