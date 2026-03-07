@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from ytmusicapi import YTMusic
-from pytubefix import YouTube
+import urllib.request
+import urllib.parse
+import json
 
 app = FastAPI()
 yt = YTMusic()
@@ -24,22 +26,48 @@ def search_music(query: str):
 
 @app.get("/api/stream")
 def get_stream(video_id: str):
-    url = f"https://www.youtube.com/watch?v={video_id}"
-    
-    # Cycle through clients known to bypass YouTube's IP-binding (403 errors).
-    # TV and IOS clients typically provide URLs that can be played on any IP address.
-    clients = ['TV', 'IOS', 'MWEB', 'WEB']
-    
-    for client in clients:
-        try:
-            yt_obj = YouTube(url, client=client)
-            stream = yt_obj.streams.get_audio_only()
-            if stream and stream.url:
-                return {"url": stream.url, "title": yt_obj.title}
-        except Exception:
-            continue
-            
-    return {"error": "All client extraction methods failed on the server."}
+    try:
+        # 1. Ask YouTube for the actual name of the song
+        song_data = yt.get_song(video_id)
+        title = song_data.get('videoDetails', {}).get('title', '')
+        artist = song_data.get('videoDetails', {}).get('author', '')
+
+        # Clean the title to get a perfect match on the secondary network
+        search_query = f"{title} {artist}".replace("Official Video", "").replace("Official Audio", "").strip()
+        safe_query = urllib.parse.quote(search_query)
+
+        # 2. Secretly query the JioSaavn open API for the unblocked audio file
+        saavn_url = f"https://saavn.dev/api/search/songs?query={safe_query}"
+        req = urllib.request.Request(saavn_url, headers={'User-Agent': 'Mozilla/5.0'})
+
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            results = data.get("data", {}).get("results", [])
+
+            if results:
+                # 3. Grab the highest quality direct download link (usually 320kbps)
+                download_urls = results[0].get("downloadUrl", [])
+                if download_urls:
+                    best_audio = download_urls[-1].get("url")
+                    return {"url": best_audio, "title": title}
+    except Exception:
+        pass
+
+    # 4. Fallback: If it's a rare YouTube-only cover, force a direct Cobalt request
+    try:
+        cobalt_url = "https://api.cobalt.tools/api/json"
+        payload = json.dumps({"url": f"https://www.youtube.com/watch?v={video_id}", "isAudioOnly": True}).encode('utf-8')
+        req = urllib.request.Request(cobalt_url, data=payload, headers={
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0'
+        })
+        with urllib.request.urlopen(req, timeout=5) as response:
+            res = json.loads(response.read().decode())
+            if res.get("url"):
+                return {"url": res.get("url"), "title": "Fallback Audio"}
+    except Exception:
+        return {"error": "Stream unavailable. Cloud server IP blocked."}
 
 @app.get("/api/radio")
 def get_radio(video_id: str):
