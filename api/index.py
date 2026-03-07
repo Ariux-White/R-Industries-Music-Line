@@ -29,11 +29,16 @@ def get_stream(video_id: str):
     cookie_path = os.path.join(os.path.dirname(__file__), 'cookies.txt')
     
     ydl_opts = {
-        'format': 'bestaudio[ext=m4a]/bestaudio/best',
+        'format': '140/bestaudio/best', # 140 is YouTube's native, highly compatible m4a format
         'quiet': True,
         'nocheckcertificate': True,
         'no_warnings': True,
-        'cookiefile': cookie_path,  # <-- The Magic Key to bypass the bot check
+        'cookiefile': cookie_path,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web'] # Brings back the mobile format access
+            }
+        }
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
