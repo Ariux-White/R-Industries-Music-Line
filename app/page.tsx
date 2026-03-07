@@ -78,7 +78,7 @@ export default function Home() {
   const lastBroadcastTime = useRef(0);
 
   const isAdmin = profile?.role?.toLowerCase()?.trim() === 'admin';
-  const getApiUrl = () => '/api';
+  const getApiUrl = () => 'https://yourusername-r-stream-engine.hf.space/api';
 
   useEffect(() => {
     const fetchSession = async () => {
