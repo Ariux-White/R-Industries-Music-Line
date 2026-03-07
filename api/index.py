@@ -25,25 +25,21 @@ def search_music(query: str):
 @app.get("/api/stream")
 def get_stream(video_id: str):
     url = f"https://www.youtube.com/watch?v={video_id}"
-    try:
-        # PyTubeFix using the Android Music client bypasses IP binding and bot checks natively
-        yt_obj = YouTube(url, client='ANDROID_MUSIC')
-        stream = yt_obj.streams.get_audio_only()
-        if stream:
-            return {"url": stream.url, "title": yt_obj.title}
-    except Exception:
+    
+    # Cycle through clients known to bypass YouTube's IP-binding (403 errors).
+    # TV and IOS clients typically provide URLs that can be played on any IP address.
+    clients = ['TV', 'IOS', 'MWEB', 'WEB']
+    
+    for client in clients:
         try:
-            # Fallback to standard WEB client if Android fails
-            yt_obj = YouTube(url, client='WEB', use_po_token=True)
+            yt_obj = YouTube(url, client=client)
             stream = yt_obj.streams.get_audio_only()
-            if stream:
+            if stream and stream.url:
                 return {"url": stream.url, "title": yt_obj.title}
         except Exception:
-            pass
-
-    # The absolute final fallback: A load-balancer that auto-routes to a healthy server
-    fallback_url = f"https://vid.puffyan.us/latest_version?id={video_id}&itag=140&local=true"
-    return {"url": fallback_url, "title": "R-Stream Fallback Audio"}
+            continue
+            
+    return {"error": "All client extraction methods failed on the server."}
 
 @app.get("/api/radio")
 def get_radio(video_id: str):
