@@ -27,23 +27,19 @@ def search_music(query: str):
 def get_stream(video_id: str):
     cookie_path = os.path.join(os.path.dirname(__file__), 'cookies.txt')
     
+    # Stripped down to the absolute bare minimum. No spoofing.
     ydl_opts = {
-        'format': 'm4a/bestaudio/best', # Casts the widest net for audio
+        'format': 'bestaudio', 
         'quiet': True,
-        'nocheckcertificate': True,
         'no_warnings': True,
-        'cookiefile': cookie_path,
-        'extractor_args': {
-            'youtube': {
-                # 'tv' and 'mweb' clients bypass the format-hiding script
-                'player_client': ['tv', 'mweb'] 
-            }
-        }
+        'nocheckcertificate': True,
+        'cookiefile': cookie_path
     }
+    
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Shift the domain to music.youtube.com to force audio-centric delivery
-            info = ydl.extract_info(f"https://music.youtube.com/watch?v={video_id}", download=False)
+            # Back to standard youtube.com to prevent 'video unavailable' errors
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
             return {"url": info['url'], "title": info['title']}
     except Exception as e:
         return {"error": str(e)}
