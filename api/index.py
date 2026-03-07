@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from ytmusicapi import YTMusic
-import urllib.request
-import json
+import random
 
 app = FastAPI()
 yt = YTMusic()
@@ -25,37 +24,24 @@ def search_music(query: str):
 
 @app.get("/api/stream")
 def get_stream(video_id: str):
-    # An array of public proxy servers to guarantee a connection
-    proxies = [
-        "https://pipedapi.tokhmi.xyz",
-        "https://pipedapi.syncpundit.io",
-        "https://api-piped.mha.fi",
-        "https://pipedapi.kavin.rocks"
+    # An array of highly stable instances. 
+    # Vercel won't contact these; it will just hand one to your browser!
+    instances = [
+        "https://invidious.flokinet.to",
+        "https://inv.tux.pizza",
+        "https://invidious.nerdvpn.de",
+        "https://invidious.projectsegfau.lt"
     ]
     
-    for proxy in proxies:
-        try:
-            url = f"{proxy}/streams/{video_id}"
-            # Add a realistic User-Agent so the proxy doesn't think Vercel is a bot
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
-            
-            with urllib.request.urlopen(req, timeout=5) as response:
-                data = json.loads(response.read().decode())
-                audio_streams = data.get("audioStreams", [])
-                
-                if audio_streams:
-                    # Prioritize M4A for universal browser compatibility
-                    for stream in audio_streams:
-                        if stream.get("format") == "M4A":
-                            return {"url": stream["url"], "title": "R-Stream Audio"}
-                    
-                    # Fallback to the first available stream
-                    return {"url": audio_streams[0]["url"], "title": "R-Stream Audio"}
-        except Exception:
-            # If this specific proxy fails or times out, seamlessly move to the next one
-            continue
-            
-    return {"error": "All proxy servers failed to retrieve the stream."}
+    # Pick a random instance to prevent overloading a single server
+    instance = random.choice(instances)
+    
+    # itag=140 is the 128kbps m4a stream.
+    # local=true forces the audio to proxy directly to your phone/laptop.
+    direct_url = f"{instance}/latest_version?id={video_id}&itag=140&local=true"
+    
+    # Vercel instantly hands this URL to your website's audio player
+    return {"url": direct_url, "title": "R-Stream Direct Audio"}
 
 @app.get("/api/radio")
 def get_radio(video_id: str):
