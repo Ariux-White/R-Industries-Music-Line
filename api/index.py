@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from ytmusicapi import YTMusic
+import urllib.request
+import json
 import random
 
 app = FastAPI()
@@ -24,24 +26,65 @@ def search_music(query: str):
 
 @app.get("/api/stream")
 def get_stream(video_id: str):
-    # An array of highly stable instances. 
-    # Vercel won't contact these; it will just hand one to your browser!
-    instances = [
-        "https://invidious.flokinet.to",
-        "https://inv.tux.pizza",
-        "https://invidious.nerdvpn.de",
-        "https://invidious.projectsegfau.lt"
+    # The ultimate list of Piped APIs (JSON based, no HTML errors)
+    piped_instances = [
+        "https://pipedapi.kavin.rocks",
+        "https://pipedapi.tokhmi.xyz",
+        "https://api-piped.mha.fi",
+        "https://piped-api.garudalinux.org",
+        "https://pipedapi.drgns.space",
+        "https://watchapi.whatever.social",
+        "https://pipedapi.smnz.de",
+        "https://piped.projectsegfau.lt/api"
     ]
     
-    # Pick a random instance to prevent overloading a single server
-    instance = random.choice(instances)
+    random.shuffle(piped_instances)
     
-    # itag=140 is the 128kbps m4a stream.
-    # local=true forces the audio to proxy directly to your phone/laptop.
-    direct_url = f"{instance}/latest_version?id={video_id}&itag=140&local=true"
+    # Strategy 1: Find a working Piped Proxy
+    for proxy in piped_instances:
+        try:
+            url = f"{proxy}/streams/{video_id}"
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+            with urllib.request.urlopen(req, timeout=3) as response:
+                data = json.loads(response.read().decode())
+                if "audioStreams" in data and len(data["audioStreams"]) > 0:
+                    streams = data["audioStreams"]
+                    # Hunt down the highly compatible M4A format
+                    for stream in streams:
+                        if stream.get("format") == "M4A":
+                            return {"url": stream["url"], "title": "R-Stream Audio"}
+                    return {"url": streams[0]["url"], "title": "R-Stream Audio"}
+        except Exception:
+            continue
+            
+    # Strategy 2: If Piped is totally blocked, fallback to Cobalt APIs
+    cobalt_instances = [
+        "https://co.wuk.sh/api/json",
+        "https://cobalt-api.kwiatekm.moe/api/json",
+        "https://api.cobalt.tems.lol/api/json"
+    ]
     
-    # Vercel instantly hands this URL to your website's audio player
-    return {"url": direct_url, "title": "R-Stream Direct Audio"}
+    random.shuffle(cobalt_instances)
+    
+    for proxy in cobalt_instances:
+        try:
+            data = json.dumps({
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+                "isAudioOnly": True
+            }).encode('utf-8')
+            req = urllib.request.Request(proxy, data=data, headers={
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0'
+            })
+            with urllib.request.urlopen(req, timeout=3) as response:
+                res = json.loads(response.read().decode())
+                if res.get("url"):
+                    return {"url": res.get("url"), "title": "R-Stream Audio"}
+        except Exception:
+            continue
+
+    return {"error": "All proxy servers completely failed."}
 
 @app.get("/api/radio")
 def get_radio(video_id: str):
