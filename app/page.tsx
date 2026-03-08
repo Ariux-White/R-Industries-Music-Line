@@ -78,7 +78,7 @@ export default function Home() {
   const lastBroadcastTime = useRef(0);
 
   const isAdmin = profile?.role?.toLowerCase()?.trim() === 'admin';
-  const getApiUrl = () => 'https://ariuxwhite-r-stream-engine.hf.space';
+  const getApiUrl = () => 'https://ariuxwhite-r-stream-engine-pro.hf.space/api';
 
   useEffect(() => {
     const fetchSession = async () => {
