@@ -1037,13 +1037,13 @@ export default function Home() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {liveResults.map((song) => (
                           <div key={song.videoId} className="flex items-center gap-4 p-2 md:p-3 rounded-2xl hover:bg-gray-800/80 transition group border border-transparent hover:border-gray-700 relative">
-                            <div className="relative w-14 h-14 md:w-16 md:h-16 shrink-0 cursor-pointer" onClick={() => playSong(song, true, liveResults)}>
+                            <div className="relative w-14 h-14 md:w-16 md:h-16 shrink-0 cursor-pointer" onClick={() => playSong(song, true, null)}>
                                <img src={getHighRes(song.thumbnail)} alt="cover" className="w-full h-full rounded-xl object-cover shadow-lg" />
                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-xl transition">
                                  <Play size={20} className="text-[#00E5FF]" fill="currentColor" />
                                </div>
                             </div>
-                            <div className="flex-1 overflow-hidden cursor-pointer" onClick={() => playSong(song, true, liveResults)}>
+                            <div className="flex-1 overflow-hidden cursor-pointer" onClick={() => playSong(song, true, null)}>
                               <p className="text-white font-bold truncate text-base md:text-lg group-hover:text-[#00E5FF] transition-colors">{song.title}</p>
                               <p className="text-gray-400 text-xs md:text-sm truncate mt-0.5">{song.artists.join(", ")}</p>
                             </div>
