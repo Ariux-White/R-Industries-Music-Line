@@ -376,13 +376,24 @@ export default function Home() {
         audioRef.current.pause();
         setIsPlaying(false);
       } else {
-        audioRef.current.play();
-        setIsPlaying(true);
+        // FIX #1: If song was loaded from local storage but audio stream expired, fetch it again cleanly
+        if (!audioRef.current.src || audioRef.current.src.endsWith("undefined") || audioRef.current.readyState === 0) {
+            if (currentSong) playSong(currentSong, false, contextQueue);
+        } else {
+            const playPromise = audioRef.current.play();
+            if (playPromise !== undefined) {
+                playPromise.then(() => setIsPlaying(true)).catch(e => {
+                    // Safe Fallback: if play fails (e.g., URL expired), restart the fetch
+                    if (currentSong) playSong(currentSong, false, contextQueue);
+                });
+            } else {
+                setIsPlaying(true);
+            }
+        }
       }
     }
   };
 
-  // FIXED: Converted to Async Engine to dynamically fetch genres on the fly.
   const handleNext = async () => {
     if (isSkippingRef.current) return;
     isSkippingRef.current = true;
@@ -403,7 +414,6 @@ export default function Home() {
     if (queue.length > 0) {
       const nextSong = queue[0];
       setQueue(queue.slice(1));
-      // Passing null here creates a brand-new auto-queue based on the manually queued song!
       playSong(nextSong, true, null); 
       unlock();
       return;
@@ -418,7 +428,6 @@ export default function Home() {
     let nextIndex = isShuffle ? Math.floor(Math.random() * contextQueue.length) : contextQueue.findIndex((s:any) => s.videoId === currentSong.videoId) + 1;
     
     if (nextIndex >= contextQueue.length || nextIndex === 0) {
-      // End of auto-queue reached (or lost). Dynamically fetch new genre mix!
       try {
           const r = await fetch(`${getApiUrl()}/radio?video_id=${currentSong.videoId}`);
           const data = await r.json();
@@ -470,14 +479,8 @@ export default function Home() {
   useEffect(() => {
     if ('mediaSession' in navigator) {
       navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
-      navigator.mediaSession.setActionHandler('play', () => {
-        if (audioRef.current) audioRef.current.play();
-        setIsPlaying(true);
-      });
-      navigator.mediaSession.setActionHandler('pause', () => {
-        if (audioRef.current) audioRef.current.pause();
-        setIsPlaying(false);
-      });
+      navigator.mediaSession.setActionHandler('play', togglePlayPause);
+      navigator.mediaSession.setActionHandler('pause', togglePlayPause);
       navigator.mediaSession.setActionHandler('nexttrack', handleNext);
       navigator.mediaSession.setActionHandler('previoustrack', handleBack);
     }
@@ -962,7 +965,8 @@ export default function Home() {
                     <div className="mb-10 md:mb-14">
                       <h3 className="text-xl md:text-2xl font-bold mb-6 text-white tracking-wide flex items-center gap-2">Listen again</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
-                        {displayListenAgain.map((song:any) => renderSongCard(song, null))}
+                        {/* FIX 4: Passing the actual array to generate the queue */}
+                        {displayListenAgain.map((song:any) => renderSongCard(song, displayListenAgain))}
                       </div>
                     </div>
                   )}
@@ -971,7 +975,8 @@ export default function Home() {
                     <div className="mb-10 md:mb-14">
                       <h3 className="text-xl md:text-2xl font-bold mb-6 text-[#00E5FF] tracking-wide flex items-center gap-2">Quick picks</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
-                        {recommendations.slice(0, 10).map(song => renderSongCard(song, null))}
+                        {/* FIX 4: Passing the actual array to generate the queue */}
+                        {recommendations.slice(0, 10).map(song => renderSongCard(song, recommendations))}
                       </div>
                     </div>
                   )}
@@ -989,7 +994,7 @@ export default function Home() {
                      {playHistory.length === 0 ? (
                        <p className="col-span-full text-gray-500 italic text-sm md:text-base">No recorded network activity found.</p>
                      ) : (
-                       playHistory.map(song => renderSongCard(song, null))
+                       playHistory.map(song => renderSongCard(song, playHistory))
                      )}
                   </div>
                 </div>
@@ -999,7 +1004,24 @@ export default function Home() {
               {activeTab === "search" && (
                 <div className="max-w-4xl relative">
                   <div className="relative mb-8 group">
-                    <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && searchQuery && !recentSearches.includes(searchQuery)) { const u = [searchQuery, ...recentSearches].slice(0,5); setRecentSearches(u); localStorage.setItem("r_recent_searches", JSON.stringify(u)); } }} placeholder="What do you want to play?" autoFocus className="w-full bg-gray-900/80 border border-gray-700 rounded-full py-4 md:py-5 px-6 pl-14 md:pl-16 focus:outline-none focus:border-[#00E5FF] focus:bg-gray-900 transition-all text-white shadow-2xl text-lg md:text-xl placeholder-gray-500 backdrop-blur-md" />
+                    <input 
+                      type="text" 
+                      value={searchQuery} 
+                      onChange={(e) => setSearchQuery(e.target.value)} 
+                      onKeyDown={(e) => { 
+                        // FIX 5: Remove duplicates and put newest search at the absolute top
+                        if (e.key === 'Enter' && searchQuery.trim()) { 
+                          const term = searchQuery.trim();
+                          const filtered = recentSearches.filter(t => t.toLowerCase() !== term.toLowerCase());
+                          const u = [term, ...filtered].slice(0, 10);
+                          setRecentSearches(u); 
+                          localStorage.setItem("r_recent_searches", JSON.stringify(u)); 
+                        } 
+                      }} 
+                      placeholder="What do you want to play?" 
+                      autoFocus 
+                      className="w-full bg-gray-900/80 border border-gray-700 rounded-full py-4 md:py-5 px-6 pl-14 md:pl-16 focus:outline-none focus:border-[#00E5FF] focus:bg-gray-900 transition-all text-white shadow-2xl text-lg md:text-xl placeholder-gray-500 backdrop-blur-md" 
+                    />
                     <Search className="absolute left-5 md:left-6 top-4 md:top-5 text-gray-400 group-focus-within:text-[#00E5FF] transition-colors" size={24} />
                   </div>
 
@@ -1008,17 +1030,49 @@ export default function Home() {
                       <h3 className="text-lg md:text-xl font-bold mb-6 text-[#00E5FF] ml-2">Live Results</h3>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {liveResults.map((song) => (
-                          <div key={song.videoId} onClick={() => playSong(song, true, null)} className="flex items-center gap-4 p-2 md:p-3 rounded-2xl hover:bg-gray-800/80 cursor-pointer transition group border border-transparent hover:border-gray-700">
-                            <div className="relative w-14 h-14 md:w-16 md:h-16 shrink-0">
+                          <div key={song.videoId} className="flex items-center gap-4 p-2 md:p-3 rounded-2xl hover:bg-gray-800/80 transition group border border-transparent hover:border-gray-700 relative">
+                            <div className="relative w-14 h-14 md:w-16 md:h-16 shrink-0 cursor-pointer" onClick={() => playSong(song, true, liveResults)}>
                                <img src={getHighRes(song.thumbnail)} alt="cover" className="w-full h-full rounded-xl object-cover shadow-lg" />
                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-xl transition">
                                  <Play size={20} className="text-[#00E5FF]" fill="currentColor" />
                                </div>
                             </div>
-                            <div className="flex-1 overflow-hidden">
+                            <div className="flex-1 overflow-hidden cursor-pointer" onClick={() => playSong(song, true, liveResults)}>
                               <p className="text-white font-bold truncate text-base md:text-lg group-hover:text-[#00E5FF] transition-colors">{song.title}</p>
                               <p className="text-gray-400 text-xs md:text-sm truncate mt-0.5">{song.artists.join(", ")}</p>
                             </div>
+                            
+                            {/* FIX 6: Added the three dot context menu to search results */}
+                            <button 
+                              onClick={(e) => { 
+                                e.preventDefault(); 
+                                e.stopPropagation(); 
+                                e.nativeEvent.stopImmediatePropagation(); 
+                                setActiveMenu(activeMenu === song.videoId ? null : song.videoId); 
+                              }} 
+                              className="text-gray-400 hover:text-white p-2 z-20 relative"
+                            >
+                              <MoreVertical size={20} />
+                            </button>
+
+                            {activeMenu === song.videoId && (
+                              <div 
+                                className="absolute top-14 right-4 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-50 py-2" 
+                                onClick={e => { e.preventDefault(); e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
+                              >
+                                <button onClick={() => { setQueue([...queue, song]); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white"><ListPlus size={16}/> Add to Queue</button>
+                                <button onClick={() => handleLike(song)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
+                                    <Heart size={16} fill={likedSongs.some(s=>s.videoId===song.videoId) ? "#00E5FF" : "none"} className={likedSongs.some(s=>s.videoId===song.videoId) ? "text-[#00E5FF]" : ""}/> 
+                                    {likedSongs.some(s=>s.videoId===song.videoId) ? "Unlike" : "Like Song"}
+                                </button>
+                                <div className="border-t border-gray-800 my-1"></div>
+                                <p className="px-4 py-1 text-[10px] text-gray-500 font-bold uppercase tracking-wider">Add to Playlist</p>
+                                {Object.keys(playlists).map(p => (
+                                  <button key={p} onClick={() => handleAddToPlaylist(song, p)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-300"><ListMusic size={14}/> {p}</button>
+                                ))}
+                              </div>
+                            )}
+
                           </div>
                         ))}
                       </div>
@@ -1227,7 +1281,8 @@ export default function Home() {
                               <p className="text-white text-xs md:text-sm font-bold truncate">{qSong.title}</p>
                               <p className="text-gray-400 text-[10px] md:text-xs truncate">{qSong.artists.join(", ")}</p>
                            </div>
-                           <button onClick={(e) => { e.stopPropagation(); setQueue(queue.filter((_, i) => i !== idx)); }} className="text-gray-500 hover:text-red-500 md:opacity-0 md:group-hover:opacity-100 transition p-1 z-10"><Trash2 size={16}/></button>
+                           {/* FIX 9: Made the remove button visible on mobile screens */}
+                           <button onClick={(e) => { e.stopPropagation(); setQueue(queue.filter((_, i) => i !== idx)); }} className="text-gray-400 hover:text-red-500 transition p-2 z-10 bg-gray-800/50 rounded-full md:bg-transparent opacity-100 md:opacity-0 md:group-hover:opacity-100"><Trash2 size={16}/></button>
                         </div>
                      ))}
                   </div>

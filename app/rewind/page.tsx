@@ -157,12 +157,15 @@ export default function Rewind() {
       </div>
 
       {/* Navigation HUD */}
-      <div className="absolute bottom-12 left-0 w-full px-12 z-50 flex items-center justify-between">
-        <button onClick={() => router.push('/')} className="flex items-center gap-2 text-gray-400 hover:text-white transition font-bold uppercase tracking-widest text-xs">
-          <HomeIcon size={16} /> Exit Matrix
+      <div className="absolute bottom-8 md:bottom-12 left-0 w-full px-4 md:px-12 z-[100] flex items-center justify-between">
+        {/* FIX 7: Huge touch target (p-4), pulled left visually (-ml-2), high z-index, collapses to "Exit" on mobile */}
+        <button onClick={() => router.push('/')} className="flex items-center gap-2 text-gray-400 hover:text-white transition font-bold uppercase tracking-widest text-[10px] md:text-xs p-4 -ml-2 z-[110]">
+          <HomeIcon size={18} /> 
+          <span className="hidden md:inline">Exit Matrix</span>
+          <span className="md:hidden">Exit</span>
         </button>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 md:gap-4 scale-90 md:scale-100 origin-right z-[110]">
           <button 
             onClick={prevSlide} 
             disabled={slide === 0}
