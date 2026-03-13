@@ -77,6 +77,9 @@ export default function Home() {
   const channelRef = useRef<any>(null);
   const lastBroadcastTime = useRef(0);
 
+  // NEW: State to hold the user's blocklist locally
+  const [blocklist, setBlocklist] = useState<string[]>([]);
+
   const isAdmin = profile?.role?.toLowerCase()?.trim() === 'admin';
   const getApiUrl = () => 'https://ariuxwhite-r-stream-engine-pro.hf.space/api';
 
@@ -92,6 +95,11 @@ export default function Home() {
           if (usersData) setAllUsers(usersData);
         }
 
+        // NEW: Fetch Blocklist from Supabase
+        const { data: blockData } = await supabase.from('user_blocklist').select('video_id').eq('user_id', session.user.id);
+        const userBlocklist = blockData ? blockData.map(b => b.video_id) : [];
+        setBlocklist(userBlocklist);
+
         const { data: historyData } = await supabase.from('play_history').select('*').eq('user_id', session.user.id).order('played_at', { ascending: false }).limit(40);
         if (historyData) {
             const formattedHistory = historyData.map(h => ({
@@ -104,7 +112,8 @@ export default function Home() {
             setPlayHistory(uniqueHistory);
 
             if (uniqueHistory.length > 0) {
-                 fetch(`${getApiUrl()}/radio?video_id=${uniqueHistory[0].videoId}`)
+                 // NEW: Pass blocklist to Quick Picks fetch
+                 fetch(`${getApiUrl()}/radio?video_id=${uniqueHistory[0].videoId}&blocked_ids=${userBlocklist.join(',')}`)
                  .then(r=>r.json()).then(data => {
                      if (!data.error && Array.isArray(data)) {
                          const uniquePicks = data.filter((v:any,i:number,a:any[])=>a.findIndex((t:any)=>(t.videoId === v.videoId))===i).slice(0, 20);
@@ -273,6 +282,27 @@ export default function Home() {
     if (audioRef.current) audioRef.current.volume = newVol;
   };
 
+  // NEW: The Function that handles Blocking a song
+  const handleBlockSong = async (song: any) => {
+    if (!user) return;
+    
+    // 1. Optimistic update (feels instant to the user)
+    setBlocklist(prev => [...prev, song.videoId]);
+    setActiveMenu(null);
+    
+    // 2. Remove it from the current queues so it doesn't play next
+    setQueue(prev => prev.filter(s => s.videoId !== song.videoId));
+    setContextQueue(prev => prev.filter(s => s.videoId !== song.videoId));
+    
+    // 3. Save it to Supabase database permanently
+    const { error } = await supabase.from('user_blocklist').insert([{ 
+        user_id: user.id, 
+        video_id: song.videoId 
+    }]);
+    
+    if (error) console.error("Blocklist sync error:", error);
+  };
+
   const playSong = async (song: any, addToHistory = true, sourceList: any[] | null = null) => {
     crossfadeFired.current = true; 
     hasLoggedCurrentSong.current = false; 
@@ -305,7 +335,8 @@ export default function Home() {
     localStorage.setItem("r_current_song", JSON.stringify(song));
 
     if (!sourceList) {
-       fetch(`${getApiUrl()}/radio?video_id=${song.videoId}`)
+       // NEW: Send the blocklist to the Python engine
+       fetch(`${getApiUrl()}/radio?video_id=${song.videoId}&blocked_ids=${blocklist.join(',')}`)
        .then(r=>r.json()).then(data => { 
            if (!data.error && Array.isArray(data)) {
                const combinedQueue = [song, ...data.filter((d:any) => d.videoId !== song.videoId)];
@@ -419,7 +450,8 @@ export default function Home() {
     
     if (nextIndex >= contextQueue.length || nextIndex === 0) {
       try {
-          const r = await fetch(`${getApiUrl()}/radio?video_id=${currentSong.videoId}`);
+          // NEW: Send the blocklist on infinite autoplay generation
+          const r = await fetch(`${getApiUrl()}/radio?video_id=${currentSong.videoId}&blocked_ids=${blocklist.join(',')}`);
           const data = await r.json();
           if (!data.error && Array.isArray(data) && data.length > 0) {
               const newRadioSongs = data.filter((d:any) => !contextQueue.find((c:any) => c.videoId === d.videoId));
@@ -733,7 +765,8 @@ export default function Home() {
              {likedSongs.some(s=>s.videoId===song.videoId) ? "Unlike" : "Like Song"}
           </button>
           
-          <button onClick={() => { alert("Added to Blocklist (Backend sync pending)"); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-400 hover:text-red-400">
+          {/* NEW: Attached the function here */}
+          <button onClick={() => handleBlockSong(song)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-400 hover:text-red-400">
              <Ban size={16}/> Don't Recommend
           </button>
           
@@ -974,7 +1007,6 @@ export default function Home() {
                     <div className="mb-10 md:mb-14">
                       <h3 className="text-xl md:text-2xl font-bold mb-6 text-white tracking-wide flex items-center gap-2">Listen again</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
-                        {/* FIX: Now passes null to force Track Radio queue generation */}
                         {displayListenAgain.map((song:any) => renderSongCard(song, null))}
                       </div>
                     </div>
@@ -984,7 +1016,6 @@ export default function Home() {
                     <div className="mb-10 md:mb-14">
                       <h3 className="text-xl md:text-2xl font-bold mb-6 text-[#00E5FF] tracking-wide flex items-center gap-2">Quick picks</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
-                        {/* FIX: Now passes null to force Track Radio queue generation */}
                         {recommendations.slice(0, 10).map(song => renderSongCard(song, null))}
                       </div>
                     </div>
@@ -1003,7 +1034,6 @@ export default function Home() {
                      {playHistory.length === 0 ? (
                        <p className="col-span-full text-gray-500 italic text-sm md:text-base">No recorded network activity found.</p>
                      ) : (
-                       // FIX: Now passes null to force Track Radio queue generation
                        playHistory.map(song => renderSongCard(song, null))
                      )}
                   </div>
@@ -1074,7 +1104,8 @@ export default function Home() {
                                     {likedSongs.some(s=>s.videoId===song.videoId) ? "Unlike" : "Like Song"}
                                 </button>
                                 
-                                <button onClick={() => { alert("Added to Blocklist (Backend sync pending)"); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-400 hover:text-red-400">
+                                {/* NEW: Attached the function here too */}
+                                <button onClick={() => handleBlockSong(song)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-400 hover:text-red-400">
                                    <Ban size={16}/> Don't Recommend
                                 </button>
 
