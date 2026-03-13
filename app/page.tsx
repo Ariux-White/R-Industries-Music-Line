@@ -273,6 +273,7 @@ export default function Home() {
     if (audioRef.current) audioRef.current.volume = newVol;
   };
 
+  // SMART QUEUE FIX: Always generate a radio queue after the clicked song
   const playSong = async (song: any, addToHistory = true, sourceList: any[] | null = null) => {
     crossfadeFired.current = true; 
     hasLoggedCurrentSong.current = false; 
@@ -294,12 +295,9 @@ export default function Home() {
        console.log("Desktop engine not detected, skipping Discord RPC.");
     }
 
-    if (sourceList) {
-        setContextQueue(sourceList);
-        localStorage.setItem("r_context_queue", JSON.stringify(sourceList));
-    } else {
-        setContextQueue([song]);
-    }
+    let initialQueue = sourceList ? [...sourceList] : [song];
+    setContextQueue(initialQueue);
+    localStorage.setItem("r_context_queue", JSON.stringify(initialQueue));
 
     if (addToHistory && song) {
       setPlayHistory(prev => {
@@ -309,19 +307,16 @@ export default function Home() {
     }
     localStorage.setItem("r_current_song", JSON.stringify(song));
 
-    if (!currentSong || song.videoId !== currentSong?.videoId) {
-       fetch(`${getApiUrl()}/radio?video_id=${song.videoId}`)
-       .then(r=>r.json()).then(data => { 
-           if (!data.error && Array.isArray(data)) {
-               if (!sourceList) {
-                   setContextQueue([song, ...data]);
-                   localStorage.setItem("r_context_queue", JSON.stringify([song, ...data]));
-               }
-           }
-       }).catch(console.error);
-    }
-
-    const workingList = sourceList || contextQueue;
+    // Force fetch radio recommendations to build out the queue automatically
+    fetch(`${getApiUrl()}/radio?video_id=${song.videoId}`)
+      .then(r=>r.json()).then(data => { 
+          if (!data.error && Array.isArray(data)) {
+              // Append the radio recommendations to whatever list we started with
+              const combinedQueue = [...initialQueue, ...data.filter((d:any) => !initialQueue.find((i:any) => i.videoId === d.videoId))];
+              setContextQueue(combinedQueue);
+              localStorage.setItem("r_context_queue", JSON.stringify(combinedQueue));
+          }
+      }).catch(console.error);
 
     try {
       let finalUrl = "";
@@ -345,7 +340,7 @@ export default function Home() {
         setIsPlaying(true);
       }
       
-      prefetchNext(workingList, song.videoId);
+      prefetchNext(initialQueue, song.videoId);
 
     } catch (error) {
       console.error(error);
@@ -412,7 +407,7 @@ export default function Home() {
     if (queue.length > 0) {
       const nextSong = queue[0];
       setQueue(queue.slice(1));
-      playSong(nextSong, true, null); 
+      playSong(nextSong, true, contextQueue); 
       unlock();
       return;
     }
@@ -974,7 +969,7 @@ export default function Home() {
                     <div className="mb-10 md:mb-14">
                       <h3 className="text-xl md:text-2xl font-bold mb-6 text-white tracking-wide flex items-center gap-2">Listen again</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
-                        {displayListenAgain.map((song:any) => renderSongCard(song, null))}
+                        {displayListenAgain.map((song:any) => renderSongCard(song, displayListenAgain))}
                       </div>
                     </div>
                   )}
@@ -983,7 +978,7 @@ export default function Home() {
                     <div className="mb-10 md:mb-14">
                       <h3 className="text-xl md:text-2xl font-bold mb-6 text-[#00E5FF] tracking-wide flex items-center gap-2">Quick picks</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
-                        {recommendations.slice(0, 10).map(song => renderSongCard(song, null))}
+                        {recommendations.slice(0, 10).map(song => renderSongCard(song, recommendations))}
                       </div>
                     </div>
                   )}
@@ -1001,7 +996,7 @@ export default function Home() {
                      {playHistory.length === 0 ? (
                        <p className="col-span-full text-gray-500 italic text-sm md:text-base">No recorded network activity found.</p>
                      ) : (
-                       playHistory.map(song => renderSongCard(song, null))
+                       playHistory.map(song => renderSongCard(song, playHistory))
                      )}
                   </div>
                 </div>
@@ -1037,13 +1032,13 @@ export default function Home() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {liveResults.map((song) => (
                           <div key={song.videoId} className="flex items-center gap-4 p-2 md:p-3 rounded-2xl hover:bg-gray-800/80 transition group border border-transparent hover:border-gray-700 relative">
-                            <div className="relative w-14 h-14 md:w-16 md:h-16 shrink-0 cursor-pointer" onClick={() => playSong(song, true, null)}>
+                            <div className="relative w-14 h-14 md:w-16 md:h-16 shrink-0 cursor-pointer" onClick={() => playSong(song, true, liveResults)}>
                                <img src={getHighRes(song.thumbnail)} alt="cover" className="w-full h-full rounded-xl object-cover shadow-lg" />
                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-xl transition">
                                  <Play size={20} className="text-[#00E5FF]" fill="currentColor" />
                                </div>
                             </div>
-                            <div className="flex-1 overflow-hidden cursor-pointer" onClick={() => playSong(song, true, null)}>
+                            <div className="flex-1 overflow-hidden cursor-pointer" onClick={() => playSong(song, true, liveResults)}>
                               <p className="text-white font-bold truncate text-base md:text-lg group-hover:text-[#00E5FF] transition-colors">{song.title}</p>
                               <p className="text-gray-400 text-xs md:text-sm truncate mt-0.5">{song.artists.join(", ")}</p>
                             </div>
