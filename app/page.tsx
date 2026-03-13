@@ -273,7 +273,7 @@ export default function Home() {
     if (audioRef.current) audioRef.current.volume = newVol;
   };
 
-  // SMART QUEUE FIX: Always generate a radio queue after the clicked song
+  // THE SPOTIFY QUEUE ALGORITHM
   const playSong = async (song: any, addToHistory = true, sourceList: any[] | null = null) => {
     crossfadeFired.current = true; 
     hasLoggedCurrentSong.current = false; 
@@ -291,10 +291,9 @@ export default function Home() {
             artist: song.artists.join(", ") 
          });
       }
-    } catch (err) {
-       console.log("Desktop engine not detected, skipping Discord RPC.");
-    }
+    } catch (err) {}
 
+    // 1. Set the exact list the user clicked as the immediate queue
     let initialQueue = sourceList ? [...sourceList] : [song];
     setContextQueue(initialQueue);
     localStorage.setItem("r_context_queue", JSON.stringify(initialQueue));
@@ -307,16 +306,17 @@ export default function Home() {
     }
     localStorage.setItem("r_current_song", JSON.stringify(song));
 
-    // Force fetch radio recommendations to build out the queue automatically
-    fetch(`${getApiUrl()}/radio?video_id=${song.videoId}`)
-      .then(r=>r.json()).then(data => { 
-          if (!data.error && Array.isArray(data)) {
-              // Append the radio recommendations to whatever list we started with
-              const combinedQueue = [...initialQueue, ...data.filter((d:any) => !initialQueue.find((i:any) => i.videoId === d.videoId))];
-              setContextQueue(combinedQueue);
-              localStorage.setItem("r_context_queue", JSON.stringify(combinedQueue));
-          }
-      }).catch(console.error);
+    // 2. If played from Search (no sourceList), immediately build a radio queue for Autoplay
+    if (!sourceList) {
+       fetch(`${getApiUrl()}/radio?video_id=${song.videoId}`)
+       .then(r=>r.json()).then(data => { 
+           if (!data.error && Array.isArray(data)) {
+               const combinedQueue = [song, ...data.filter((d:any) => d.videoId !== song.videoId)];
+               setContextQueue(combinedQueue);
+               localStorage.setItem("r_context_queue", JSON.stringify(combinedQueue));
+           }
+       }).catch(console.error);
+    }
 
     try {
       let finalUrl = "";
@@ -420,17 +420,26 @@ export default function Home() {
     
     let nextIndex = isShuffle ? Math.floor(Math.random() * contextQueue.length) : contextQueue.findIndex((s:any) => s.videoId === currentSong.videoId) + 1;
     
+    // 3. INFINITE AUTOPLAY: If we reach the end of the playlist, dynamically fetch more radio!
     if (nextIndex >= contextQueue.length || nextIndex === 0) {
       try {
           const r = await fetch(`${getApiUrl()}/radio?video_id=${currentSong.videoId}`);
           const data = await r.json();
           if (!data.error && Array.isArray(data) && data.length > 0) {
-              const nextFromRadio = data.find((s:any) => s.videoId !== currentSong.videoId) || data[0];
-              playSong(nextFromRadio, true, null); 
-              unlock();
-              return;
+              const newRadioSongs = data.filter((d:any) => !contextQueue.find((c:any) => c.videoId === d.videoId));
+              const newQueue = [...contextQueue, ...newRadioSongs];
+              
+              setContextQueue(newQueue);
+              localStorage.setItem("r_context_queue", JSON.stringify(newQueue));
+              
+              const nextFromRadio = newQueue[contextQueue.length];
+              if (nextFromRadio) {
+                  playSong(nextFromRadio, true, newQueue);
+                  unlock();
+                  return;
+              }
           }
-      } catch (e) { console.error("Dynamic radio fetch failed:", e); }
+      } catch (e) {}
       
       if (repeatMode === 0) {
         setIsPlaying(false);
@@ -969,6 +978,7 @@ export default function Home() {
                     <div className="mb-10 md:mb-14">
                       <h3 className="text-xl md:text-2xl font-bold mb-6 text-white tracking-wide flex items-center gap-2">Listen again</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
+                        {/* FIX: Passes displayListenAgain so it queues properly */}
                         {displayListenAgain.map((song:any) => renderSongCard(song, displayListenAgain))}
                       </div>
                     </div>
@@ -978,6 +988,7 @@ export default function Home() {
                     <div className="mb-10 md:mb-14">
                       <h3 className="text-xl md:text-2xl font-bold mb-6 text-[#00E5FF] tracking-wide flex items-center gap-2">Quick picks</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
+                        {/* FIX: Passes recommendations so it queues properly */}
                         {recommendations.slice(0, 10).map(song => renderSongCard(song, recommendations))}
                       </div>
                     </div>
@@ -1032,13 +1043,14 @@ export default function Home() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {liveResults.map((song) => (
                           <div key={song.videoId} className="flex items-center gap-4 p-2 md:p-3 rounded-2xl hover:bg-gray-800/80 transition group border border-transparent hover:border-gray-700 relative">
-                            <div className="relative w-14 h-14 md:w-16 md:h-16 shrink-0 cursor-pointer" onClick={() => playSong(song, true, liveResults)}>
+                            {/* FIX: Passing null to force immediate radio auto-play for search results */}
+                            <div className="relative w-14 h-14 md:w-16 md:h-16 shrink-0 cursor-pointer" onClick={() => playSong(song, true, null)}>
                                <img src={getHighRes(song.thumbnail)} alt="cover" className="w-full h-full rounded-xl object-cover shadow-lg" />
                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-xl transition">
                                  <Play size={20} className="text-[#00E5FF]" fill="currentColor" />
                                </div>
                             </div>
-                            <div className="flex-1 overflow-hidden cursor-pointer" onClick={() => playSong(song, true, liveResults)}>
+                            <div className="flex-1 overflow-hidden cursor-pointer" onClick={() => playSong(song, true, null)}>
                               <p className="text-white font-bold truncate text-base md:text-lg group-hover:text-[#00E5FF] transition-colors">{song.title}</p>
                               <p className="text-gray-400 text-xs md:text-sm truncate mt-0.5">{song.artists.join(", ")}</p>
                             </div>
