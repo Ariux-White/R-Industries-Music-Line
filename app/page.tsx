@@ -376,14 +376,12 @@ export default function Home() {
         audioRef.current.pause();
         setIsPlaying(false);
       } else {
-        // FIX #1: If song was loaded from local storage but audio stream expired, fetch it again cleanly
         if (!audioRef.current.src || audioRef.current.src.endsWith("undefined") || audioRef.current.readyState === 0) {
             if (currentSong) playSong(currentSong, false, contextQueue);
         } else {
             const playPromise = audioRef.current.play();
             if (playPromise !== undefined) {
                 playPromise.then(() => setIsPlaying(true)).catch(e => {
-                    // Safe Fallback: if play fails (e.g., URL expired), restart the fetch
                     if (currentSong) playSong(currentSong, false, contextQueue);
                 });
             } else {
@@ -735,8 +733,12 @@ export default function Home() {
              {likedSongs.some(s=>s.videoId===song.videoId) ? "Unlike" : "Like Song"}
           </button>
           
+          <button onClick={() => { alert("Added to Blocklist (Backend sync pending)"); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-400 hover:text-red-400">
+             <Ban size={16}/> Don't Recommend
+          </button>
+          
           {viewingPlaylist && viewingPlaylist !== 'Liked Songs' && (
-            <button onClick={() => removeSongFromPlaylist(song.videoId, viewingPlaylist)} className="w-full text-left px-4 py-2 text-sm hover:bg-red-900/40 flex items-center gap-2 text-red-400"><Ban size={16}/> Remove from Playlist</button>
+            <button onClick={() => removeSongFromPlaylist(song.videoId, viewingPlaylist)} className="w-full text-left px-4 py-2 text-sm hover:bg-red-900/40 flex items-center gap-2 text-red-400"><Trash2 size={16}/> Remove from Playlist</button>
           )}
 
           <div className="border-t border-gray-800 my-1"></div>
@@ -757,6 +759,13 @@ export default function Home() {
         <img src="/r-logo.jpg" alt="bg" className="w-full h-full object-cover opacity-25" />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-[#050505]/90"></div>
       </div>
+
+      {activeMenu && (
+        <div 
+          className="fixed inset-0 z-[45]" 
+          onClick={(e) => { e.stopPropagation(); setActiveMenu(null); }} 
+        />
+      )}
 
       {isMobileMenuOpen && (
         <div className="md:hidden fixed inset-0 z-[110] bg-[#050505] flex flex-col p-6 animate-in slide-in-from-right duration-300 shadow-2xl">
@@ -965,8 +974,7 @@ export default function Home() {
                     <div className="mb-10 md:mb-14">
                       <h3 className="text-xl md:text-2xl font-bold mb-6 text-white tracking-wide flex items-center gap-2">Listen again</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
-                        {/* FIX 4: Passing the actual array to generate the queue */}
-                        {displayListenAgain.map((song:any) => renderSongCard(song, displayListenAgain))}
+                        {displayListenAgain.map((song:any) => renderSongCard(song, null))}
                       </div>
                     </div>
                   )}
@@ -975,8 +983,7 @@ export default function Home() {
                     <div className="mb-10 md:mb-14">
                       <h3 className="text-xl md:text-2xl font-bold mb-6 text-[#00E5FF] tracking-wide flex items-center gap-2">Quick picks</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
-                        {/* FIX 4: Passing the actual array to generate the queue */}
-                        {recommendations.slice(0, 10).map(song => renderSongCard(song, recommendations))}
+                        {recommendations.slice(0, 10).map(song => renderSongCard(song, null))}
                       </div>
                     </div>
                   )}
@@ -994,7 +1001,7 @@ export default function Home() {
                      {playHistory.length === 0 ? (
                        <p className="col-span-full text-gray-500 italic text-sm md:text-base">No recorded network activity found.</p>
                      ) : (
-                       playHistory.map(song => renderSongCard(song, playHistory))
+                       playHistory.map(song => renderSongCard(song, null))
                      )}
                   </div>
                 </div>
@@ -1009,7 +1016,6 @@ export default function Home() {
                       value={searchQuery} 
                       onChange={(e) => setSearchQuery(e.target.value)} 
                       onKeyDown={(e) => { 
-                        // FIX 5: Remove duplicates and put newest search at the absolute top
                         if (e.key === 'Enter' && searchQuery.trim()) { 
                           const term = searchQuery.trim();
                           const filtered = recentSearches.filter(t => t.toLowerCase() !== term.toLowerCase());
@@ -1042,7 +1048,6 @@ export default function Home() {
                               <p className="text-gray-400 text-xs md:text-sm truncate mt-0.5">{song.artists.join(", ")}</p>
                             </div>
                             
-                            {/* FIX 6: Added the three dot context menu to search results */}
                             <button 
                               onClick={(e) => { 
                                 e.preventDefault(); 
@@ -1065,11 +1070,17 @@ export default function Home() {
                                     <Heart size={16} fill={likedSongs.some(s=>s.videoId===song.videoId) ? "#00E5FF" : "none"} className={likedSongs.some(s=>s.videoId===song.videoId) ? "text-[#00E5FF]" : ""}/> 
                                     {likedSongs.some(s=>s.videoId===song.videoId) ? "Unlike" : "Like Song"}
                                 </button>
+                                
+                                <button onClick={() => { alert("Added to Blocklist (Backend sync pending)"); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-400 hover:text-red-400">
+                                   <Ban size={16}/> Don't Recommend
+                                </button>
+
                                 <div className="border-t border-gray-800 my-1"></div>
                                 <p className="px-4 py-1 text-[10px] text-gray-500 font-bold uppercase tracking-wider">Add to Playlist</p>
                                 {Object.keys(playlists).map(p => (
                                   <button key={p} onClick={() => handleAddToPlaylist(song, p)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-300"><ListMusic size={14}/> {p}</button>
                                 ))}
+                                <button onClick={() => { handleNavClick("library"); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-[#00E5FF]"><Plus size={14}/> Create New...</button>
                               </div>
                             )}
 
@@ -1281,7 +1292,6 @@ export default function Home() {
                               <p className="text-white text-xs md:text-sm font-bold truncate">{qSong.title}</p>
                               <p className="text-gray-400 text-[10px] md:text-xs truncate">{qSong.artists.join(", ")}</p>
                            </div>
-                           {/* FIX 9: Made the remove button visible on mobile screens */}
                            <button onClick={(e) => { e.stopPropagation(); setQueue(queue.filter((_, i) => i !== idx)); }} className="text-gray-400 hover:text-red-500 transition p-2 z-10 bg-gray-800/50 rounded-full md:bg-transparent opacity-100 md:opacity-0 md:group-hover:opacity-100"><Trash2 size={16}/></button>
                         </div>
                      ))}
