@@ -77,17 +77,26 @@ export default function Home() {
   const channelRef = useRef<any>(null);
   const lastBroadcastTime = useRef(0);
 
-  // NEW: State to hold the user's blocklist locally
   const [blocklist, setBlocklist] = useState<string[]>([]);
+  const cloudSettingsRef = useRef<any>({});
 
   const isAdmin = profile?.role?.toLowerCase()?.trim() === 'admin';
   const getApiUrl = () => 'https://ariuxwhite-r-stream-engine-pro.hf.space/api';
+
+  // THE GLOBAL SYNC HELPER
+  const syncSettings = (newSettings: any) => {
+      if (!user?.id) return;
+      cloudSettingsRef.current = { ...cloudSettingsRef.current, ...newSettings };
+      supabase.from('user_library').update({ playback_settings: cloudSettingsRef.current }).eq('user_id', user.id).then();
+  };
 
   useEffect(() => {
     const fetchSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         setUser(session.user);
+        
+        // 1. Fetch Profile
         const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
         setProfile(data);
         if (data?.role?.toLowerCase()?.trim() === 'admin') {
@@ -95,11 +104,39 @@ export default function Home() {
           if (usersData) setAllUsers(usersData);
         }
 
-        // NEW: Fetch Blocklist from Supabase
+        // 2. Fetch Blocklist
         const { data: blockData } = await supabase.from('user_blocklist').select('video_id').eq('user_id', session.user.id);
         const userBlocklist = blockData ? blockData.map(b => b.video_id) : [];
         setBlocklist(userBlocklist);
 
+        // 3. FETCH GLOBAL LIBRARY DATA (Replacing localStorage)
+        let { data: libData } = await supabase.from('user_library').select('*').eq('user_id', session.user.id).single();
+        if (!libData) {
+            // First time login: Create their library in the cloud
+            await supabase.from('user_library').insert([{ user_id: session.user.id }]);
+            libData = { liked_songs: [], playlists: {}, recent_searches: [], playback_settings: {} };
+        }
+
+        setLikedSongs(libData.liked_songs || []);
+        setPlaylists(libData.playlists || {});
+        setRecentSearches(libData.recent_searches || []);
+        
+        const settings = libData.playback_settings || {};
+        cloudSettingsRef.current = settings;
+        
+        if (settings.volume !== undefined) { setVolume(settings.volume); if (audioRef.current) audioRef.current.volume = settings.volume; }
+        if (settings.fadeTime !== undefined) setFadeTime(settings.fadeTime);
+        if (settings.isShuffle !== undefined) setIsShuffle(settings.isShuffle);
+        if (settings.repeatMode !== undefined) setRepeatMode(settings.repeatMode);
+        if (settings.contextQueue) setContextQueue(settings.contextQueue);
+        if (settings.queue) setQueue(settings.queue);
+        if (settings.quickPicks) setRecommendations(settings.quickPicks);
+        if (settings.currentSong) {
+            setCurrentSong(settings.currentSong);
+            if (audioRef.current) audioRef.current.src = settings.currentSong.streamUrl;
+        }
+
+        // 4. Fetch History & Generate Quick Picks
         const { data: historyData } = await supabase.from('play_history').select('*').eq('user_id', session.user.id).order('played_at', { ascending: false }).limit(40);
         if (historyData) {
             const formattedHistory = historyData.map(h => ({
@@ -111,19 +148,19 @@ export default function Home() {
             const uniqueHistory = formattedHistory.filter((v,i,a)=>a.findIndex(t=>(t.videoId === v.videoId))===i);
             setPlayHistory(uniqueHistory);
 
-            if (uniqueHistory.length > 0) {
-                 // NEW: Pass blocklist to Quick Picks fetch
+            if (uniqueHistory.length > 0 && (!settings.quickPicks || settings.quickPicks.length === 0)) {
                  fetch(`${getApiUrl()}/radio?video_id=${uniqueHistory[0].videoId}&blocked_ids=${userBlocklist.join(',')}`)
                  .then(r=>r.json()).then(data => {
                      if (!data.error && Array.isArray(data)) {
                          const uniquePicks = data.filter((v:any,i:number,a:any[])=>a.findIndex((t:any)=>(t.videoId === v.videoId))===i).slice(0, 20);
                          setRecommendations(uniquePicks);
-                         localStorage.setItem("r_quick_picks", JSON.stringify(uniquePicks));
+                         syncSettings({ quickPicks: uniquePicks }); // Save to cloud
                      }
                  }).catch(console.error);
             }
         }
 
+        // 5. Connect to Live Device Sync
         const channel = supabase.channel(`sync_${session.user.id}`);
         channel.on('broadcast', { event: 'sync' }, ({ payload }) => {
           if (payload.deviceId !== deviceId) {
@@ -145,43 +182,6 @@ export default function Home() {
       setLoading(false);
     };
     fetchSession();
-
-    const savedVol = localStorage.getItem("r_volume");
-    if (savedVol) setVolume(parseFloat(savedVol));
-
-    const savedFade = localStorage.getItem("r_fade");
-    if (savedFade) setFadeTime(parseFloat(savedFade));
-
-    const savedShuffle = localStorage.getItem("r_shuffle");
-    if (savedShuffle) setIsShuffle(savedShuffle === 'true');
-
-    const savedRepeat = localStorage.getItem("r_repeat");
-    if (savedRepeat) setRepeatMode(parseInt(savedRepeat) as 0|1|2);
-
-    const savedPicks = localStorage.getItem("r_quick_picks");
-    if (savedPicks) setRecommendations(JSON.parse(savedPicks));
-
-    const savedQueue = localStorage.getItem("r_context_queue");
-    if (savedQueue) setContextQueue(JSON.parse(savedQueue));
-
-    const savedSong = localStorage.getItem("r_current_song");
-    if (savedSong) {
-      const parsed = JSON.parse(savedSong);
-      setCurrentSong(parsed);
-      if (audioRef.current) {
-        audioRef.current.src = parsed.streamUrl;
-        audioRef.current.volume = savedVol ? parseFloat(savedVol) : 1;
-      }
-    }
-
-    const savedSearches = localStorage.getItem("r_recent_searches");
-    if (savedSearches) setRecentSearches(JSON.parse(savedSearches));
-    
-    const savedLikes = localStorage.getItem("r_likes");
-    if (savedLikes) setLikedSongs(JSON.parse(savedLikes));
-    
-    const savedPlaylists = localStorage.getItem("r_playlists");
-    if (savedPlaylists) setPlaylists(JSON.parse(savedPlaylists));
 
     return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); }
   }, [router, deviceId]);
@@ -278,29 +278,30 @@ export default function Home() {
     if (newVol > 1) newVol = 1;
     if (newVol < 0) newVol = 0;
     setVolume(newVol);
-    localStorage.setItem("r_volume", newVol.toString());
+    syncSettings({ volume: newVol });
     if (audioRef.current) audioRef.current.volume = newVol;
   };
 
-  // NEW: The Function that handles Blocking a song
   const handleBlockSong = async (song: any) => {
     if (!user) return;
     
-    // 1. Optimistic update (feels instant to the user)
     setBlocklist(prev => [...prev, song.videoId]);
     setActiveMenu(null);
     
-    // 2. Remove it from the current queues so it doesn't play next
-    setQueue(prev => prev.filter(s => s.videoId !== song.videoId));
-    setContextQueue(prev => prev.filter(s => s.videoId !== song.videoId));
+    // Purge song from queues dynamically
+    setQueue(prev => {
+        const nQ = prev.filter(s => s.videoId !== song.videoId);
+        syncSettings({ queue: nQ });
+        return nQ;
+    });
+    setContextQueue(prev => {
+        const nCQ = prev.filter(s => s.videoId !== song.videoId);
+        syncSettings({ contextQueue: nCQ });
+        return nCQ;
+    });
     
-    // 3. Save it to Supabase database permanently
-    const { error } = await supabase.from('user_blocklist').insert([{ 
-        user_id: user.id, 
-        video_id: song.videoId 
-    }]);
-    
-    if (error) console.error("Blocklist sync error:", error);
+    // Sync blocklist strictly to DB
+    await supabase.from('user_blocklist').insert([{ user_id: user.id, video_id: song.videoId }]);
   };
 
   const playSong = async (song: any, addToHistory = true, sourceList: any[] | null = null) => {
@@ -324,7 +325,7 @@ export default function Home() {
 
     let initialQueue = sourceList ? [...sourceList] : [song];
     setContextQueue(initialQueue);
-    localStorage.setItem("r_context_queue", JSON.stringify(initialQueue));
+    syncSettings({ contextQueue: initialQueue });
 
     if (addToHistory && song) {
       setPlayHistory(prev => {
@@ -332,16 +333,15 @@ export default function Home() {
         return updated;
       });
     }
-    localStorage.setItem("r_current_song", JSON.stringify(song));
+    syncSettings({ currentSong: song });
 
     if (!sourceList) {
-       // NEW: Send the blocklist to the Python engine
        fetch(`${getApiUrl()}/radio?video_id=${song.videoId}&blocked_ids=${blocklist.join(',')}`)
        .then(r=>r.json()).then(data => { 
            if (!data.error && Array.isArray(data)) {
                const combinedQueue = [song, ...data.filter((d:any) => d.videoId !== song.videoId)];
                setContextQueue(combinedQueue);
-               localStorage.setItem("r_context_queue", JSON.stringify(combinedQueue));
+               syncSettings({ contextQueue: combinedQueue });
            }
        }).catch(console.error);
     }
@@ -357,6 +357,8 @@ export default function Home() {
       }
 
       setCurrentSong({ ...song, streamUrl: finalUrl, isLoading: false, highResThumb: getHighRes(song.thumbnail) });
+      syncSettings({ currentSong: { ...song, streamUrl: finalUrl } });
+      
       if (audioRef.current) {
         audioRef.current.src = finalUrl;
         audioRef.current.volume = volume; 
@@ -434,7 +436,9 @@ export default function Home() {
     
     if (queue.length > 0) {
       const nextSong = queue[0];
-      setQueue(queue.slice(1));
+      const newQ = queue.slice(1);
+      setQueue(newQ);
+      syncSettings({ queue: newQ });
       playSong(nextSong, true, contextQueue); 
       unlock();
       return;
@@ -450,7 +454,6 @@ export default function Home() {
     
     if (nextIndex >= contextQueue.length || nextIndex === 0) {
       try {
-          // NEW: Send the blocklist on infinite autoplay generation
           const r = await fetch(`${getApiUrl()}/radio?video_id=${currentSong.videoId}&blocked_ids=${blocklist.join(',')}`);
           const data = await r.json();
           if (!data.error && Array.isArray(data) && data.length > 0) {
@@ -458,7 +461,7 @@ export default function Home() {
               const newQueue = [...contextQueue, ...newRadioSongs];
               
               setContextQueue(newQueue);
-              localStorage.setItem("r_context_queue", JSON.stringify(newQueue));
+              syncSettings({ contextQueue: newQueue });
               
               const nextFromRadio = newQueue[contextQueue.length];
               if (nextFromRadio) {
@@ -603,7 +606,7 @@ export default function Home() {
     const exists = likedSongs.find(s => s.videoId === song.videoId);
     const updated = exists ? likedSongs.filter(s => s.videoId !== song.videoId) : [...likedSongs, song];
     setLikedSongs(updated);
-    localStorage.setItem("r_likes", JSON.stringify(updated));
+    if (user) supabase.from('user_library').update({ liked_songs: updated }).eq('user_id', user.id).then();
     setActiveMenu(null);
   };
 
@@ -612,7 +615,7 @@ export default function Home() {
     if (!list.find((s: any) => s.videoId === song.videoId)) {
       const updated = { ...playlists, [pName]: [...list, song] };
       setPlaylists(updated);
-      localStorage.setItem("r_playlists", JSON.stringify(updated));
+      if (user) supabase.from('user_library').update({ playlists: updated }).eq('user_id', user.id).then();
     }
     setActiveMenu(null);
   };
@@ -621,7 +624,7 @@ export default function Home() {
     if (!confirm(`Are you sure you want to delete "${pName}"? This action is permanent.`)) return;
     const { [pName]: removed, ...rest } = playlists;
     setPlaylists(rest);
-    localStorage.setItem("r_playlists", JSON.stringify(rest));
+    if (user) supabase.from('user_library').update({ playlists: rest }).eq('user_id', user.id).then();
     setViewingPlaylist(null);
   };
 
@@ -629,7 +632,7 @@ export default function Home() {
     const updatedList = playlists[pName].filter((s: any) => s.videoId !== videoId);
     const updatedPlaylists = { ...playlists, [pName]: updatedList };
     setPlaylists(updatedPlaylists);
-    localStorage.setItem("r_playlists", JSON.stringify(updatedPlaylists));
+    if (user) supabase.from('user_library').update({ playlists: updatedPlaylists }).eq('user_id', user.id).then();
     setActiveMenu(null);
   };
 
@@ -640,7 +643,7 @@ export default function Home() {
     updated[newRenameValue] = updated[viewingPlaylist];
     delete updated[viewingPlaylist];
     setPlaylists(updated);
-    localStorage.setItem("r_playlists", JSON.stringify(updated));
+    if (user) supabase.from('user_library').update({ playlists: updated }).eq('user_id', user.id).then();
     setViewingPlaylist(newRenameValue);
     setRenamingPlaylist(null);
   };
@@ -650,7 +653,7 @@ export default function Home() {
     if (!newPlaylistName) return;
     const updated = { ...playlists, [newPlaylistName]: [] };
     setPlaylists(updated);
-    localStorage.setItem("r_playlists", JSON.stringify(updated));
+    if (user) supabase.from('user_library').update({ playlists: updated }).eq('user_id', user.id).then();
     setNewPlaylistName("");
   };
 
@@ -675,7 +678,7 @@ export default function Home() {
             
             const updated = { ...playlists, [pName]: data.tracks };
             setPlaylists(updated);
-            localStorage.setItem("r_playlists", JSON.stringify(updated));
+            if (user) supabase.from('user_library').update({ playlists: updated }).eq('user_id', user.id).then();
             setShowImportModal(false);
             setImportUrl("");
             setViewingPlaylist(pName);
@@ -743,9 +746,7 @@ export default function Home() {
         </div>
         <button 
           onClick={(e) => { 
-            e.preventDefault(); 
             e.stopPropagation(); 
-            e.nativeEvent.stopImmediatePropagation(); 
             setActiveMenu(activeMenu === song.videoId ? null : song.videoId); 
           }} 
           className="text-gray-400 hover:text-white p-1 z-20 relative"
@@ -756,18 +757,26 @@ export default function Home() {
 
       {activeMenu === song.videoId && (
         <div 
-          className="absolute top-10 right-4 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-50 py-2" 
-          onClick={e => { e.preventDefault(); e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
+          className="absolute top-10 right-4 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[55] py-2" 
+          onClick={e => e.stopPropagation()}
         >
-          <button onClick={() => { setQueue([...queue, song]); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white"><ListPlus size={16}/> Add to Queue</button>
+          <button onClick={() => { 
+              const nQ = [...queue, song];
+              setQueue(nQ); 
+              syncSettings({ queue: nQ });
+              setActiveMenu(null); 
+          }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
+              <ListPlus size={16}/> Add to Queue
+          </button>
+          
           <button onClick={() => handleLike(song)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
              <Heart size={16} fill={likedSongs.some(s=>s.videoId===song.videoId) ? "#00E5FF" : "none"} className={likedSongs.some(s=>s.videoId===song.videoId) ? "text-[#00E5FF]" : ""}/> 
              {likedSongs.some(s=>s.videoId===song.videoId) ? "Unlike" : "Like Song"}
           </button>
           
-          {/* NEW: Attached the function here */}
-          <button onClick={() => handleBlockSong(song)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-400 hover:text-red-400">
-             <Ban size={16}/> Don't Recommend
+          {/* THE FIX: Re-styled to pure white so it doesn't look grayed out, and e.preventDefault is gone */}
+          <button onClick={() => handleBlockSong(song)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white hover:text-red-400">
+             <Ban size={16} className="text-red-500"/> Don't Recommend
           </button>
           
           {viewingPlaylist && viewingPlaylist !== 'Liked Songs' && (
@@ -793,10 +802,11 @@ export default function Home() {
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-[#050505]/90"></div>
       </div>
 
+      {/* THE FIX: Invisible overlay no longer catches button clicks aggressively */}
       {activeMenu && (
         <div 
           className="fixed inset-0 z-[45]" 
-          onClick={(e) => { e.stopPropagation(); setActiveMenu(null); }} 
+          onClick={() => setActiveMenu(null)} 
         />
       )}
 
@@ -918,7 +928,7 @@ export default function Home() {
                       onChange={(e) => {
                         const val = Number(e.target.value);
                         setFadeTime(val);
-                        localStorage.setItem("r_fade", val.toString());
+                        syncSettings({ fadeTime: val });
                       }} 
                       className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 md:[&::-webkit-slider-thumb]:w-3 md:[&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[#00E5FF] [&::-webkit-slider-thumb]:rounded-full transition-all" 
                     />
@@ -1054,7 +1064,7 @@ export default function Home() {
                           const filtered = recentSearches.filter(t => t.toLowerCase() !== term.toLowerCase());
                           const u = [term, ...filtered].slice(0, 10);
                           setRecentSearches(u); 
-                          localStorage.setItem("r_recent_searches", JSON.stringify(u)); 
+                          if (user) supabase.from('user_library').update({ recent_searches: u }).eq('user_id', user.id).then();
                         } 
                       }} 
                       placeholder="What do you want to play?" 
@@ -1083,9 +1093,7 @@ export default function Home() {
                             
                             <button 
                               onClick={(e) => { 
-                                e.preventDefault(); 
                                 e.stopPropagation(); 
-                                e.nativeEvent.stopImmediatePropagation(); 
                                 setActiveMenu(activeMenu === song.videoId ? null : song.videoId); 
                               }} 
                               className="text-gray-400 hover:text-white p-2 z-20 relative"
@@ -1095,18 +1103,25 @@ export default function Home() {
 
                             {activeMenu === song.videoId && (
                               <div 
-                                className="absolute top-14 right-4 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-50 py-2" 
-                                onClick={e => { e.preventDefault(); e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); }}
+                                className="absolute top-14 right-4 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[55] py-2" 
+                                onClick={e => e.stopPropagation()}
                               >
-                                <button onClick={() => { setQueue([...queue, song]); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white"><ListPlus size={16}/> Add to Queue</button>
+                                <button onClick={() => { 
+                                    const nQ = [...queue, song];
+                                    setQueue(nQ); 
+                                    syncSettings({ queue: nQ });
+                                    setActiveMenu(null); 
+                                }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
+                                    <ListPlus size={16}/> Add to Queue
+                                </button>
+                                
                                 <button onClick={() => handleLike(song)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
                                     <Heart size={16} fill={likedSongs.some(s=>s.videoId===song.videoId) ? "#00E5FF" : "none"} className={likedSongs.some(s=>s.videoId===song.videoId) ? "text-[#00E5FF]" : ""}/> 
                                     {likedSongs.some(s=>s.videoId===song.videoId) ? "Unlike" : "Like Song"}
                                 </button>
                                 
-                                {/* NEW: Attached the function here too */}
-                                <button onClick={() => handleBlockSong(song)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-400 hover:text-red-400">
-                                   <Ban size={16}/> Don't Recommend
+                                <button onClick={() => handleBlockSong(song)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white hover:text-red-400">
+                                   <Ban size={16} className="text-red-500"/> Don't Recommend
                                 </button>
 
                                 <div className="border-t border-gray-800 my-1"></div>
@@ -1127,7 +1142,7 @@ export default function Home() {
                       <div className="mb-10 mt-8 bg-black/40 p-4 md:p-6 rounded-3xl border border-gray-800/50 backdrop-blur-md">
                         <div className="flex items-center justify-between mb-6">
                           <h3 className="text-lg md:text-xl font-bold tracking-wide">Recent Extractions</h3>
-                          <button onClick={() => { setRecentSearches([]); localStorage.removeItem("r_recent_searches"); }} className="text-[10px] md:text-xs font-bold text-gray-400 hover:text-red-400 uppercase tracking-widest transition px-3 py-1 border border-gray-700 rounded-full hover:border-red-400">Clear All</button>
+                          <button onClick={() => { setRecentSearches([]); if (user) supabase.from('user_library').update({ recent_searches: [] }).eq('user_id', user.id).then(); }} className="text-[10px] md:text-xs font-bold text-gray-400 hover:text-red-400 uppercase tracking-widest transition px-3 py-1 border border-gray-700 rounded-full hover:border-red-400">Clear All</button>
                         </div>
                         <div className="flex flex-wrap gap-2 md:gap-3">
                           {recentSearches.map((term, i) => (
@@ -1326,7 +1341,12 @@ export default function Home() {
                               <p className="text-white text-xs md:text-sm font-bold truncate">{qSong.title}</p>
                               <p className="text-gray-400 text-[10px] md:text-xs truncate">{qSong.artists.join(", ")}</p>
                            </div>
-                           <button onClick={(e) => { e.stopPropagation(); setQueue(queue.filter((_, i) => i !== idx)); }} className="text-gray-400 hover:text-red-500 transition p-2 z-10 bg-gray-800/50 rounded-full md:bg-transparent opacity-100 md:opacity-0 md:group-hover:opacity-100"><Trash2 size={16}/></button>
+                           <button onClick={(e) => { 
+                               e.stopPropagation(); 
+                               const nQ = queue.filter((_, i) => i !== idx);
+                               setQueue(nQ); 
+                               syncSettings({ queue: nQ });
+                           }} className="text-gray-400 hover:text-red-500 transition p-2 z-10 bg-gray-800/50 rounded-full md:bg-transparent opacity-100 md:opacity-0 md:group-hover:opacity-100"><Trash2 size={16}/></button>
                         </div>
                      ))}
                   </div>
@@ -1465,7 +1485,7 @@ export default function Home() {
                       onClick={() => { 
                         const val = !isShuffle; 
                         setIsShuffle(val); 
-                        localStorage.setItem("r_shuffle", val.toString()); 
+                        syncSettings({ isShuffle: val });
                       }} 
                       className={`${isShuffle ? 'text-[#00E5FF]' : 'text-gray-400 hover:text-white'} transition hover:scale-110`}
                     >
@@ -1480,7 +1500,7 @@ export default function Home() {
                       onClick={() => { 
                         const val = (repeatMode === 2 ? 0 : repeatMode + 1) as 0|1|2; 
                         setRepeatMode(val); 
-                        localStorage.setItem("r_repeat", val.toString()); 
+                        syncSettings({ repeatMode: val });
                       }} 
                       className={`${repeatMode > 0 ? 'text-[#00E5FF]' : 'text-gray-400 hover:text-white'} transition hover:scale-110 relative`}
                     >
@@ -1594,7 +1614,7 @@ export default function Home() {
                 </div>
             ) : (
                 <div className="flex justify-between items-center mb-8">
-                    <button onClick={() => { const val = !isShuffle; setIsShuffle(val); localStorage.setItem("r_shuffle", val.toString()); }} className={isShuffle ? 'text-[#00E5FF]' : 'text-gray-400'}>
+                    <button onClick={() => { const val = !isShuffle; setIsShuffle(val); syncSettings({ isShuffle: val }); }} className={isShuffle ? 'text-[#00E5FF]' : 'text-gray-400'}>
                         <Shuffle size={24} />
                     </button>
                     <button onClick={handleBack} className="text-white"><SkipBack size={40} fill="currentColor" /></button>
@@ -1602,7 +1622,7 @@ export default function Home() {
                         {isPlaying ? <Pause size={32} fill="currentColor" /> : <Play size={32} fill="currentColor" className="ml-1" />}
                     </button>
                     <button onClick={handleNext} className="text-white"><SkipForward size={40} fill="currentColor" /></button>
-                    <button onClick={() => { const val = (repeatMode === 2 ? 0 : repeatMode + 1) as 0|1|2; setRepeatMode(val); localStorage.setItem("r_repeat", val.toString()); }} className={`relative ${repeatMode > 0 ? 'text-[#00E5FF]' : 'text-gray-400'}`}>
+                    <button onClick={() => { const val = (repeatMode === 2 ? 0 : repeatMode + 1) as 0|1|2; setRepeatMode(val); syncSettings({ repeatMode: val }); }} className={`relative ${repeatMode > 0 ? 'text-[#00E5FF]' : 'text-gray-400'}`}>
                         {repeatMode === 2 ? <Repeat1 size={24} /> : <Repeat size={24} />}
                         {repeatMode > 0 && <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-1 h-1 bg-[#00E5FF] rounded-full"></span>}
                     </button>
