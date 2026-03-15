@@ -79,12 +79,17 @@ export default function Home() {
 
   const [blocklist, setBlocklist] = useState<string[]>([]);
   const cloudSettingsRef = useRef<any>({});
-  
-  // NEW: Ref to make sure we only send the Discord update once per song
   const discordRpcFired = useRef<string | null>(null);
 
   const isAdmin = profile?.role?.toLowerCase()?.trim() === 'admin';
   const getApiUrl = () => 'https://ariuxwhite-r-stream-engine-pro.hf.space/api';
+
+  const decodeHtml = (text: string) => {
+    if (typeof document === 'undefined') return text;
+    const txt = document.createElement("textarea");
+    txt.innerHTML = text;
+    return txt.value;
+  };
 
   const syncSettings = (newSettings: any) => {
       if (!user?.id) return;
@@ -138,7 +143,7 @@ export default function Home() {
         if (historyData) {
             const formattedHistory = historyData.map(h => ({
                 videoId: h.video_id,
-                title: h.title,
+                title: decodeHtml(h.title),
                 artists: [h.artist],
                 thumbnail: h.cover_url
             }));
@@ -198,7 +203,7 @@ export default function Home() {
       try {
         const res = await fetch(`${getApiUrl()}/search?query=${encodeURIComponent(searchQuery)}`);
         const data = await res.json();
-        setLiveResults(data);
+        setLiveResults(data.map((s: any) => ({...s, title: decodeHtml(s.title)})));
       } catch (e) { console.error(e); }
     }, 400);
     return () => clearTimeout(delay);
@@ -306,55 +311,63 @@ export default function Home() {
         setRemoteSession(null);
     }
 
-    setCurrentSong({ ...song, isLoading: true });
+    const cleanSong = { ...song, title: decodeHtml(song.title) };
+    setCurrentSong({ ...cleanSong, isLoading: true });
 
-    let initialQueue = sourceList ? [...sourceList] : [song];
+    let initialQueue = sourceList ? sourceList.map(s => ({...s, title: decodeHtml(s.title)})) : [cleanSong];
     setContextQueue(initialQueue);
     syncSettings({ contextQueue: initialQueue });
 
     if (addToHistory && song) {
       setPlayHistory(prev => {
-        const updated = [song, ...prev].filter((v,i,a)=>a.findIndex(t=>(t.videoId === v.videoId))===i).slice(0, 30);
+        const updated = [cleanSong, ...prev].filter((v,i,a)=>a.findIndex(t=>(t.videoId === v.videoId))===i).slice(0, 30);
         return updated;
       });
     }
-    syncSettings({ currentSong: song });
+    syncSettings({ currentSong: cleanSong });
 
     if (!sourceList) {
        fetch(`${getApiUrl()}/radio?video_id=${song.videoId}&blocked_ids=${blocklist.join(',')}`)
        .then(r=>r.json()).then(data => { 
            if (!data.error && Array.isArray(data)) {
-               const combinedQueue = [song, ...data.filter((d:any) => d.videoId !== song.videoId)];
+               const decodedRadio = data.map((d: any) => ({...d, title: decodeHtml(d.title)}));
+               const combinedQueue = [cleanSong, ...decodedRadio.filter((d:any) => d.videoId !== song.videoId)];
                setContextQueue(combinedQueue);
                syncSettings({ contextQueue: combinedQueue });
            }
        }).catch(console.error);
     }
 
-    try {
-      let finalUrl = "";
-      if (nextAudioCache && nextAudioCache.id === song.videoId) {
-        finalUrl = nextAudioCache.url; 
-      } else {
-        const res = await fetch(`${getApiUrl()}/stream?video_id=${song.videoId}`);
-        const data = await res.json();
-        finalUrl = data.url;
-      }
+    if (nextAudioCache && nextAudioCache.id === song.videoId) {
+        setCurrentSong({ ...cleanSong, streamUrl: nextAudioCache.url, isLoading: false, highResThumb: getHighRes(song.thumbnail) });
+        syncSettings({ currentSong: { ...cleanSong, streamUrl: nextAudioCache.url } });
+        
+        if (audioRef.current) {
+            audioRef.current.src = nextAudioCache.url;
+            audioRef.current.volume = volume;
+            const playPromise = audioRef.current.play();
+            if (playPromise !== undefined) { playPromise.catch(e => console.warn("Background play blocked:", e)); }
+            setIsPlaying(true);
+        }
+        prefetchNext(initialQueue, song.videoId);
+        return; 
+    }
 
-      setCurrentSong({ ...song, streamUrl: finalUrl, isLoading: false, highResThumb: getHighRes(song.thumbnail) });
-      syncSettings({ currentSong: { ...song, streamUrl: finalUrl } });
+    try {
+      const res = await fetch(`${getApiUrl()}/stream?video_id=${song.videoId}`);
+      const data = await res.json();
+      const finalUrl = data.url;
+
+      setCurrentSong({ ...cleanSong, streamUrl: finalUrl, isLoading: false, highResThumb: getHighRes(song.thumbnail) });
+      syncSettings({ currentSong: { ...cleanSong, streamUrl: finalUrl } });
       
       if (audioRef.current) {
         audioRef.current.src = finalUrl;
         audioRef.current.volume = volume; 
-        
         const playPromise = audioRef.current.play();
-        if (playPromise !== undefined) {
-            playPromise.catch(e => console.warn("Playback safely interrupted:", e));
-        }
+        if (playPromise !== undefined) { playPromise.catch(e => console.warn("Playback safely interrupted:", e)); }
         setIsPlaying(true);
       }
-      
       prefetchNext(initialQueue, song.videoId);
 
     } catch (error) {
@@ -442,7 +455,8 @@ export default function Home() {
           const r = await fetch(`${getApiUrl()}/radio?video_id=${currentSong.videoId}&blocked_ids=${blocklist.join(',')}`);
           const data = await r.json();
           if (!data.error && Array.isArray(data) && data.length > 0) {
-              const newRadioSongs = data.filter((d:any) => !contextQueue.find((c:any) => c.videoId === d.videoId));
+              const decodedRadio = data.map((d: any) => ({...d, title: decodeHtml(d.title)}));
+              const newRadioSongs = decodedRadio.filter((d:any) => !contextQueue.find((c:any) => c.videoId === d.videoId));
               const newQueue = [...contextQueue, ...newRadioSongs];
               
               setContextQueue(newQueue);
@@ -512,23 +526,26 @@ export default function Home() {
 
     if (!dur || isNaN(dur)) return;
 
-    if (isPlaying && dur > 0 && discordRpcFired.current !== currentSong?.videoId) {
-        discordRpcFired.current = currentSong?.videoId;
-        try {
-            if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-                const nowSec = Math.floor(Date.now() / 1000);
-                const startSec = nowSec - Math.floor(ct);
-                const endSec = startSec + Math.floor(dur);
-                
-                invoke('update_discord_status', { 
-                    song: currentSong.title, 
-                    artist: currentSong.artists.join(", "),
-                    thumbnail: getHighRes(currentSong.thumbnail),
-                    start: startSec, 
-                    end: endSec      
-                });
-            }
-        } catch (err) {}
+    if (isPlaying && dur > 0) {
+        if (discordRpcFired.current !== currentSong?.videoId) {
+            discordRpcFired.current = currentSong?.videoId;
+            try {
+                if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+                    const nowSec = Math.floor(Date.now() / 1000);
+                    const startSec = nowSec - Math.floor(ct);
+                    invoke('update_discord_status', { 
+                        song: currentSong.title, 
+                        artist: currentSong.artists.join(", "),
+                        thumbnail: getHighRes(currentSong.thumbnail),
+                        start: startSec
+                    });
+                }
+            } catch (err) {}
+        }
+    } else if (!isPlaying) {
+        // Tell Rust to clear Discord when paused
+        invoke('clear_discord_status');
+        discordRpcFired.current = null; // Reset so it fires again on resume
     }
 
     if (isPlaying && (ct - lastBroadcastTime.current > 1 || ct < lastBroadcastTime.current)) {
@@ -733,7 +750,7 @@ export default function Home() {
   const autoQueue = activeIdx !== -1 && activeIdx < contextQueue.length - 1 ? contextQueue.slice(activeIdx + 1, activeIdx + 21) : [];
 
   const renderSongCard = (song: any, currentList: any[] | null) => (
-    <div key={song.videoId} className="bg-gray-900/40 hover:bg-gray-800/80 p-4 rounded-2xl transition group border border-gray-800/50 hover:border-gray-600 backdrop-blur-sm relative">
+    <div key={song.videoId} className={`bg-gray-900/40 hover:bg-gray-800/80 p-4 rounded-2xl transition group border border-gray-800/50 hover:border-gray-600 backdrop-blur-sm relative ${activeMenu === song.videoId ? 'z-[50]' : ''}`}>
       <div className="relative mb-4 aspect-square cursor-pointer" onClick={() => playSong(song, true, currentList)}>
         <img src={getHighRes(song.thumbnail)} alt="cover" className="w-full h-full object-cover rounded-xl shadow-lg" />
         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-xl transition">
@@ -742,7 +759,7 @@ export default function Home() {
       </div>
       <div className="flex justify-between items-start">
         <div className="overflow-hidden cursor-pointer flex-1 pr-2" onClick={() => playSong(song, true, currentList)}>
-          <p className="text-white font-bold truncate text-sm hover:underline">{song.title}</p>
+          <p className="text-white font-bold truncate text-sm hover:underline">{decodeHtml(song.title)}</p>
           <p className="text-gray-400 text-xs truncate mt-1">{song.artists.join(", ")}</p>
         </div>
         <button 
@@ -766,27 +783,28 @@ export default function Home() {
               const nQ = [...queue, song];
               setQueue(nQ); 
               syncSettings({ queue: nQ });
+              setActiveMenu(null);
           }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
               <ListPlus size={16}/> Add to Queue
           </button>
           
-          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLike(song); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
+          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLike(song); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
              <Heart size={16} fill={likedSongs.some(s=>s.videoId===song.videoId) ? "#00E5FF" : "none"} className={likedSongs.some(s=>s.videoId===song.videoId) ? "text-[#00E5FF]" : ""}/> 
              {likedSongs.some(s=>s.videoId===song.videoId) ? "Unlike" : "Like Song"}
           </button>
           
-          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleBlockSong(song); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white hover:text-red-400">
+          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleBlockSong(song); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white hover:text-red-400">
              <Ban size={16} className="text-red-500"/> Don't Recommend
           </button>
           
           {viewingPlaylist && viewingPlaylist !== 'Liked Songs' && (
-            <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeSongFromPlaylist(song.videoId, viewingPlaylist); }} className="w-full text-left px-4 py-2 text-sm hover:bg-red-900/40 flex items-center gap-2 text-red-400"><Trash2 size={16}/> Remove from Playlist</button>
+            <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeSongFromPlaylist(song.videoId, viewingPlaylist); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-red-900/40 flex items-center gap-2 text-red-400"><Trash2 size={16}/> Remove from Playlist</button>
           )}
 
           <div className="border-t border-gray-800 my-1"></div>
           <p className="px-4 py-1 text-[10px] text-gray-500 font-bold uppercase tracking-wider">Add to Playlist</p>
           {Object.keys(playlists).map(p => (
-            <button key={p} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleAddToPlaylist(song, p); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-300"><ListMusic size={14}/> {p}</button>
+            <button key={p} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleAddToPlaylist(song, p); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-300"><ListMusic size={14}/> {p}</button>
           ))}
           <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavClick("library"); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-[#00E5FF]"><Plus size={14}/> Create New...</button>
         </div>
@@ -801,13 +819,6 @@ export default function Home() {
         <img src="/r-logo.jpg" alt="bg" className="w-full h-full object-cover opacity-25" />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-[#050505]/90"></div>
       </div>
-
-      {activeMenu && (
-        <div 
-          className="fixed inset-0 z-[45]" 
-          onClick={() => setActiveMenu(null)} 
-        />
-      )}
 
       {isMobileMenuOpen && (
         <div className="md:hidden fixed inset-0 z-[110] bg-[#050505] flex flex-col p-6 animate-in slide-in-from-right duration-300 shadow-2xl">
@@ -894,6 +905,9 @@ export default function Home() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 md:p-8 relative scroll-smooth">
+          {activeMenu && (
+            <div className="fixed inset-0 z-[40] cursor-default" onClick={() => setActiveMenu(null)} />
+          )}
           
           <div 
             onClick={() => { if (window.innerWidth < 768) setIsMobileMenuOpen(true); }}
@@ -1074,11 +1088,13 @@ export default function Home() {
                   </div>
 
                   {liveResults.length > 0 && searchQuery.length > 1 ? (
-                    <div className="bg-black/80 border border-gray-700 rounded-3xl backdrop-blur-2xl p-4 md:p-6 shadow-2xl">
+                    /* THE FIX: Added relative z-[100] isolate to keep search results on top layer */
+                    <div className="bg-black/80 border border-gray-700 rounded-3xl backdrop-blur-2xl p-4 md:p-6 shadow-2xl relative z-[100] isolate">
                       <h3 className="text-lg md:text-xl font-bold mb-6 text-[#00E5FF] ml-2">Live Results</h3>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {liveResults.map((song) => (
-                          <div key={song.videoId} className="flex items-center gap-4 p-2 md:p-3 rounded-2xl hover:bg-gray-800/80 transition group border border-transparent hover:border-gray-700 relative">
+                          /* THE FIX: Each search card boosts to z-[110] when active */
+                          <div key={song.videoId} className={`flex items-center gap-4 p-2 md:p-3 rounded-2xl hover:bg-gray-800/80 transition group border border-transparent hover:border-gray-700 relative ${activeMenu === song.videoId ? 'z-[110] bg-gray-800' : 'z-10'}`}>
                             <div className="relative w-14 h-14 md:w-16 md:h-16 shrink-0 cursor-pointer" onClick={() => playSong(song, true, null)}>
                                <img src={getHighRes(song.thumbnail)} alt="cover" className="w-full h-full rounded-xl object-cover shadow-lg" />
                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-xl transition">
@@ -1086,7 +1102,7 @@ export default function Home() {
                                </div>
                             </div>
                             <div className="flex-1 overflow-hidden cursor-pointer" onClick={() => playSong(song, true, null)}>
-                              <p className="text-white font-bold truncate text-base md:text-lg group-hover:text-[#00E5FF] transition-colors">{song.title}</p>
+                              <p className="text-white font-bold truncate text-base md:text-lg group-hover:text-[#00E5FF] transition-colors">{decodeHtml(song.title)}</p>
                               <p className="text-gray-400 text-xs md:text-sm truncate mt-0.5">{song.artists.join(", ")}</p>
                             </div>
                             
@@ -1102,7 +1118,7 @@ export default function Home() {
 
                             {activeMenu === song.videoId && (
                               <div 
-                                className="absolute top-14 right-4 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[55] py-2" 
+                                className="absolute top-14 right-4 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[120] py-2" 
                                 onClick={e => e.stopPropagation()}
                               >
                                 <button onClick={(e) => { 
@@ -1110,23 +1126,24 @@ export default function Home() {
                                     const nQ = [...queue, song];
                                     setQueue(nQ); 
                                     syncSettings({ queue: nQ });
+                                    setActiveMenu(null);
                                 }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
                                     <ListPlus size={16}/> Add to Queue
                                 </button>
                                 
-                                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLike(song); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
+                                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLike(song); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
                                     <Heart size={16} fill={likedSongs.some(s=>s.videoId===song.videoId) ? "#00E5FF" : "none"} className={likedSongs.some(s=>s.videoId===song.videoId) ? "text-[#00E5FF]" : ""}/> 
                                     {likedSongs.some(s=>s.videoId===song.videoId) ? "Unlike" : "Like Song"}
                                 </button>
                                 
-                                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleBlockSong(song); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white hover:text-red-400">
+                                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleBlockSong(song); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white hover:text-red-400">
                                    <Ban size={16} className="text-red-500"/> Don't Recommend
                                 </button>
 
                                 <div className="border-t border-gray-800 my-1"></div>
                                 <p className="px-4 py-1 text-[10px] text-gray-500 font-bold uppercase tracking-wider">Add to Playlist</p>
                                 {Object.keys(playlists).map(p => (
-                                  <button key={p} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleAddToPlaylist(song, p); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-300"><ListMusic size={14}/> {p}</button>
+                                  <button key={p} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleAddToPlaylist(song, p); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-300"><ListMusic size={14}/> {p}</button>
                                 ))}
                                 <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavClick("library"); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-[#00E5FF]"><Plus size={14}/> Create New...</button>
                               </div>
@@ -1251,21 +1268,28 @@ export default function Home() {
           )}
           
           {/* IMPORT PLAYLIST MODAL OVERLAY */}
-          {showImportModal && (
-            <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                <div className="bg-gray-900 border border-gray-700 p-6 md:p-8 rounded-3xl w-full max-w-lg shadow-2xl relative">
-                    <button onClick={() => {setShowImportModal(false); setImportUrl("");}} className="absolute top-4 right-4 md:top-6 md:right-6 text-gray-400 hover:text-white transition"><X size={24}/></button>
-                    <h3 className="text-xl md:text-2xl font-bold mb-2 text-white flex items-center gap-2"><ListPlus className="text-[#00E5FF]"/> Import Data</h3>
-                    <p className="text-gray-400 text-xs md:text-sm mb-6">Paste a YouTube or YouTube Music playlist link below to extract its contents directly into your library.</p>
-                    <form onSubmit={handleImportPlaylist} className="flex flex-col gap-4">
-                        <input type="text" value={importUrl} onChange={(e)=>setImportUrl(e.target.value)} placeholder="e.g., https://music.youtube.com/playlist?list=..." className="w-full bg-black border border-gray-600 rounded-xl px-4 py-3 focus:outline-none focus:border-[#00E5FF] text-white text-sm md:text-base" required />
-                        <button type="submit" disabled={isImporting} className="w-full bg-[#00E5FF] text-black font-extrabold rounded-xl py-3 md:py-4 hover:bg-cyan-400 transition tracking-widest uppercase disabled:opacity-50 shadow-[0_0_15px_rgba(0,229,255,0.3)] text-xs md:text-base">
-                            {isImporting ? "Extracting Neural Data..." : "Initialize Import"}
-                        </button>
-                    </form>
-                </div>
-            </div>
-          )}
+{showImportModal && (
+  <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+      <div className="bg-gray-900 border border-gray-700 p-6 md:p-8 rounded-3xl w-full max-w-lg shadow-2xl relative">
+          <button onClick={() => {setShowImportModal(false); setImportUrl("");}} className="absolute top-4 right-4 md:top-6 md:right-6 text-gray-400 hover:text-white transition"><X size={24}/></button>
+          <h3 className="text-xl md:text-2xl font-bold mb-2 text-white flex items-center gap-2"><ListPlus className="text-[#00E5FF]"/> Import Data</h3>
+          
+          <p className="text-gray-400 text-xs md:text-sm mb-6">
+              Paste a YouTube or YouTube Music playlist link below.<br/><br/>
+              <span className="text-[#D4AF37] font-semibold tracking-wide">
+                  To import from Spotify, please use a free converter like TuneMyMusic.com to generate a YouTube link first.
+              </span>
+          </p>
+
+          <form onSubmit={handleImportPlaylist} className="flex flex-col gap-4">
+              <input type="text" value={importUrl} onChange={(e)=>setImportUrl(e.target.value)} placeholder="e.g., https://music.youtube.com/playlist?list=..." className="w-full bg-black border border-gray-600 rounded-xl px-4 py-3 focus:outline-none focus:border-[#00E5FF] text-white text-sm md:text-base" required />
+              <button type="submit" disabled={isImporting} className="w-full bg-[#00E5FF] text-black font-extrabold rounded-xl py-3 md:py-4 hover:bg-cyan-400 transition tracking-widest uppercase disabled:opacity-50 shadow-[0_0_15px_rgba(0,229,255,0.3)] text-xs md:text-base">
+                  {isImporting ? "Extracting Neural Data..." : "Initialize Import"}
+              </button>
+          </form>
+      </div>
+  </div>
+)}
         </div>
         
         {/* SYNced NEON LYRICS PANEL */}
@@ -1339,7 +1363,7 @@ export default function Home() {
                              className="flex justify-between items-center group bg-gray-900/40 p-2 rounded-lg hover:bg-gray-800 transition cursor-pointer"
                            >
                               <div className="overflow-hidden flex-1 pr-2 pointer-events-none">
-                                 <p className="text-white text-xs md:text-sm font-bold truncate">{qSong.title}</p>
+                                 <p className="text-white text-xs md:text-sm font-bold truncate">{decodeHtml(qSong.title)}</p>
                                  <p className="text-gray-400 text-[10px] md:text-xs truncate">{qSong.artists.join(", ")}</p>
                               </div>
                               <button onClick={(e) => { 
@@ -1365,7 +1389,7 @@ export default function Home() {
                              className="flex justify-between items-center bg-gray-900/20 hover:bg-gray-800/50 p-2 rounded-lg cursor-pointer transition"
                            >
                               <div className="overflow-hidden flex-1 pr-2 pointer-events-none">
-                                 <p className="text-gray-300 text-xs md:text-sm font-semibold truncate">{aSong.title}</p>
+                                 <p className="text-gray-300 text-xs md:text-sm font-semibold truncate">{decodeHtml(aSong.title)}</p>
                                  <p className="text-gray-500 text-[10px] md:text-xs truncate">{aSong.artists.join(", ")}</p>
                               </div>
                            </div>
@@ -1434,7 +1458,7 @@ export default function Home() {
                 </div>
               )}
               <div className="overflow-hidden flex-1 md:flex-none">
-                <p className="text-white font-bold truncate text-sm md:text-base hover:underline cursor-pointer tracking-wide">{displaySong.title}</p>
+                <p className="text-white font-bold truncate text-sm md:text-base hover:underline cursor-pointer tracking-wide">{decodeHtml(displaySong.title)}</p>
                 <p className="text-gray-400 text-xs truncate hover:underline cursor-pointer md:mt-0.5">{displaySong.artists?.join(", ")}</p>
               </div>
               {!displaySong.isLoading && (
@@ -1583,7 +1607,7 @@ export default function Home() {
             {/* Track Info & Like Button */}
             <div className="flex justify-between items-center mb-6">
                 <div className="overflow-hidden pr-4 flex-1">
-                    <h2 className="text-2xl font-bold text-white truncate">{displaySong.title}</h2>
+                    <h2 className="text-2xl font-bold text-white truncate">{decodeHtml(displaySong.title)}</h2>
                     <p className="text-gray-400 text-lg truncate mt-1">{displaySong.artists?.join(", ")}</p>
                 </div>
                 <button onClick={() => handleLike(displaySong)} className="p-2 -mr-2">
