@@ -79,11 +79,13 @@ export default function Home() {
 
   const [blocklist, setBlocklist] = useState<string[]>([]);
   const cloudSettingsRef = useRef<any>({});
+  
+  // NEW: Ref to make sure we only send the Discord update once per song
+  const discordRpcFired = useRef<string | null>(null);
 
   const isAdmin = profile?.role?.toLowerCase()?.trim() === 'admin';
   const getApiUrl = () => 'https://ariuxwhite-r-stream-engine-pro.hf.space/api';
 
-  // THE GLOBAL SYNC HELPER
   const syncSettings = (newSettings: any) => {
       if (!user?.id) return;
       cloudSettingsRef.current = { ...cloudSettingsRef.current, ...newSettings };
@@ -96,7 +98,6 @@ export default function Home() {
       if (session?.user) {
         setUser(session.user);
         
-        // 1. Fetch Profile
         const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
         setProfile(data);
         if (data?.role?.toLowerCase()?.trim() === 'admin') {
@@ -104,15 +105,12 @@ export default function Home() {
           if (usersData) setAllUsers(usersData);
         }
 
-        // 2. Fetch Blocklist
         const { data: blockData } = await supabase.from('user_blocklist').select('video_id').eq('user_id', session.user.id);
         const userBlocklist = blockData ? blockData.map(b => b.video_id) : [];
         setBlocklist(userBlocklist);
 
-        // 3. FETCH GLOBAL LIBRARY DATA (Replacing localStorage)
         let { data: libData } = await supabase.from('user_library').select('*').eq('user_id', session.user.id).single();
         if (!libData) {
-            // First time login: Create their library in the cloud
             await supabase.from('user_library').insert([{ user_id: session.user.id }]);
             libData = { liked_songs: [], playlists: {}, recent_searches: [], playback_settings: {} };
         }
@@ -136,7 +134,6 @@ export default function Home() {
             if (audioRef.current) audioRef.current.src = settings.currentSong.streamUrl;
         }
 
-        // 4. Fetch History & Generate Quick Picks
         const { data: historyData } = await supabase.from('play_history').select('*').eq('user_id', session.user.id).order('played_at', { ascending: false }).limit(40);
         if (historyData) {
             const formattedHistory = historyData.map(h => ({
@@ -154,13 +151,12 @@ export default function Home() {
                      if (!data.error && Array.isArray(data)) {
                          const uniquePicks = data.filter((v:any,i:number,a:any[])=>a.findIndex((t:any)=>(t.videoId === v.videoId))===i).slice(0, 20);
                          setRecommendations(uniquePicks);
-                         syncSettings({ quickPicks: uniquePicks }); // Save to cloud
+                         syncSettings({ quickPicks: uniquePicks });
                      }
                  }).catch(console.error);
             }
         }
 
-        // 5. Connect to Live Device Sync
         const channel = supabase.channel(`sync_${session.user.id}`);
         channel.on('broadcast', { event: 'sync' }, ({ payload }) => {
           if (payload.deviceId !== deviceId) {
@@ -286,9 +282,7 @@ export default function Home() {
     if (!user) return;
     
     setBlocklist(prev => [...prev, song.videoId]);
-    setActiveMenu(null);
     
-    // Purge song from queues dynamically
     setQueue(prev => {
         const nQ = prev.filter(s => s.videoId !== song.videoId);
         syncSettings({ queue: nQ });
@@ -300,7 +294,6 @@ export default function Home() {
         return nCQ;
     });
     
-    // Sync blocklist strictly to DB
     await supabase.from('user_blocklist').insert([{ user_id: user.id, video_id: song.videoId }]);
   };
 
@@ -314,14 +307,6 @@ export default function Home() {
     }
 
     setCurrentSong({ ...song, isLoading: true });
-    try {
-      if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-         invoke('update_discord_status', { 
-            song: song.title, 
-            artist: song.artists.join(", ") 
-         });
-      }
-    } catch (err) {}
 
     let initialQueue = sourceList ? [...sourceList] : [song];
     setContextQueue(initialQueue);
@@ -527,6 +512,25 @@ export default function Home() {
 
     if (!dur || isNaN(dur)) return;
 
+    if (isPlaying && dur > 0 && discordRpcFired.current !== currentSong?.videoId) {
+        discordRpcFired.current = currentSong?.videoId;
+        try {
+            if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+                const nowSec = Math.floor(Date.now() / 1000);
+                const startSec = nowSec - Math.floor(ct);
+                const endSec = startSec + Math.floor(dur);
+                
+                invoke('update_discord_status', { 
+                    song: currentSong.title, 
+                    artist: currentSong.artists.join(", "),
+                    thumbnail: getHighRes(currentSong.thumbnail),
+                    start: startSec, 
+                    end: endSec      
+                });
+            }
+        } catch (err) {}
+    }
+
     if (isPlaying && (ct - lastBroadcastTime.current > 1 || ct < lastBroadcastTime.current)) {
         lastBroadcastTime.current = ct;
         if (channelRef.current && currentSong) {
@@ -607,7 +611,6 @@ export default function Home() {
     const updated = exists ? likedSongs.filter(s => s.videoId !== song.videoId) : [...likedSongs, song];
     setLikedSongs(updated);
     if (user) supabase.from('user_library').update({ liked_songs: updated }).eq('user_id', user.id).then();
-    setActiveMenu(null);
   };
 
   const handleAddToPlaylist = (song: any, pName: string) => {
@@ -617,7 +620,6 @@ export default function Home() {
       setPlaylists(updated);
       if (user) supabase.from('user_library').update({ playlists: updated }).eq('user_id', user.id).then();
     }
-    setActiveMenu(null);
   };
 
   const deletePlaylist = (pName: string) => {
@@ -633,7 +635,6 @@ export default function Home() {
     const updatedPlaylists = { ...playlists, [pName]: updatedList };
     setPlaylists(updatedPlaylists);
     if (user) supabase.from('user_library').update({ playlists: updatedPlaylists }).eq('user_id', user.id).then();
-    setActiveMenu(null);
   };
 
   const handleRenamePlaylist = (e: React.FormEvent) => {
@@ -760,35 +761,34 @@ export default function Home() {
           className="absolute top-10 right-4 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[55] py-2" 
           onClick={e => e.stopPropagation()}
         >
-          <button onClick={() => { 
+          <button onClick={(e) => { 
+              e.preventDefault(); e.stopPropagation();
               const nQ = [...queue, song];
               setQueue(nQ); 
               syncSettings({ queue: nQ });
-              setActiveMenu(null); 
           }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
               <ListPlus size={16}/> Add to Queue
           </button>
           
-          <button onClick={() => handleLike(song)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
+          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLike(song); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
              <Heart size={16} fill={likedSongs.some(s=>s.videoId===song.videoId) ? "#00E5FF" : "none"} className={likedSongs.some(s=>s.videoId===song.videoId) ? "text-[#00E5FF]" : ""}/> 
              {likedSongs.some(s=>s.videoId===song.videoId) ? "Unlike" : "Like Song"}
           </button>
           
-          {/* THE FIX: Re-styled to pure white so it doesn't look grayed out, and e.preventDefault is gone */}
-          <button onClick={() => handleBlockSong(song)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white hover:text-red-400">
+          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleBlockSong(song); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white hover:text-red-400">
              <Ban size={16} className="text-red-500"/> Don't Recommend
           </button>
           
           {viewingPlaylist && viewingPlaylist !== 'Liked Songs' && (
-            <button onClick={() => removeSongFromPlaylist(song.videoId, viewingPlaylist)} className="w-full text-left px-4 py-2 text-sm hover:bg-red-900/40 flex items-center gap-2 text-red-400"><Trash2 size={16}/> Remove from Playlist</button>
+            <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeSongFromPlaylist(song.videoId, viewingPlaylist); }} className="w-full text-left px-4 py-2 text-sm hover:bg-red-900/40 flex items-center gap-2 text-red-400"><Trash2 size={16}/> Remove from Playlist</button>
           )}
 
           <div className="border-t border-gray-800 my-1"></div>
           <p className="px-4 py-1 text-[10px] text-gray-500 font-bold uppercase tracking-wider">Add to Playlist</p>
           {Object.keys(playlists).map(p => (
-            <button key={p} onClick={() => handleAddToPlaylist(song, p)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-300"><ListMusic size={14}/> {p}</button>
+            <button key={p} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleAddToPlaylist(song, p); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-300"><ListMusic size={14}/> {p}</button>
           ))}
-          <button onClick={() => { handleNavClick("library"); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-[#00E5FF]"><Plus size={14}/> Create New...</button>
+          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavClick("library"); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-[#00E5FF]"><Plus size={14}/> Create New...</button>
         </div>
       )}
     </div>
@@ -802,7 +802,6 @@ export default function Home() {
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-[#050505]/90"></div>
       </div>
 
-      {/* THE FIX: Invisible overlay no longer catches button clicks aggressively */}
       {activeMenu && (
         <div 
           className="fixed inset-0 z-[45]" 
@@ -1106,30 +1105,30 @@ export default function Home() {
                                 className="absolute top-14 right-4 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[55] py-2" 
                                 onClick={e => e.stopPropagation()}
                               >
-                                <button onClick={() => { 
+                                <button onClick={(e) => { 
+                                    e.preventDefault(); e.stopPropagation();
                                     const nQ = [...queue, song];
                                     setQueue(nQ); 
                                     syncSettings({ queue: nQ });
-                                    setActiveMenu(null); 
                                 }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
                                     <ListPlus size={16}/> Add to Queue
                                 </button>
                                 
-                                <button onClick={() => handleLike(song)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
+                                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleLike(song); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white">
                                     <Heart size={16} fill={likedSongs.some(s=>s.videoId===song.videoId) ? "#00E5FF" : "none"} className={likedSongs.some(s=>s.videoId===song.videoId) ? "text-[#00E5FF]" : ""}/> 
                                     {likedSongs.some(s=>s.videoId===song.videoId) ? "Unlike" : "Like Song"}
                                 </button>
                                 
-                                <button onClick={() => handleBlockSong(song)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white hover:text-red-400">
+                                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleBlockSong(song); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-white hover:text-red-400">
                                    <Ban size={16} className="text-red-500"/> Don't Recommend
                                 </button>
 
                                 <div className="border-t border-gray-800 my-1"></div>
                                 <p className="px-4 py-1 text-[10px] text-gray-500 font-bold uppercase tracking-wider">Add to Playlist</p>
                                 {Object.keys(playlists).map(p => (
-                                  <button key={p} onClick={() => handleAddToPlaylist(song, p)} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-300"><ListMusic size={14}/> {p}</button>
+                                  <button key={p} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleAddToPlaylist(song, p); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-gray-300"><ListMusic size={14}/> {p}</button>
                                 ))}
-                                <button onClick={() => { handleNavClick("library"); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-[#00E5FF]"><Plus size={14}/> Create New...</button>
+                                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleNavClick("library"); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-800 flex items-center gap-2 text-[#00E5FF]"><Plus size={14}/> Create New...</button>
                               </div>
                             )}
 
@@ -1318,63 +1317,66 @@ export default function Home() {
 
         {/* QUEUE PANEL */}
         {showQueue && (
-          <div className="absolute bottom-20 md:bottom-28 right-2 md:right-8 w-[calc(100%-16px)] md:w-96 max-h-[400px] md:max-h-[500px] bg-[#0a0a0a]/95 backdrop-blur-3xl border border-gray-800 rounded-2xl z-[60] p-4 md:p-6 overflow-y-auto shadow-[0_0_40px_rgba(0,0,0,0.9)]">
-             <div className="flex justify-between items-center mb-4 border-b border-gray-800 pb-2">
-                <h3 className="text-base md:text-lg font-bold text-white flex items-center gap-2"><Activity size={18} className="text-[#00E5FF]"/> Up Next</h3>
-                <button onClick={() => setShowQueue(false)} className="md:hidden text-gray-400"><X size={20}/></button>
-             </div>
-             
-             {queue.length > 0 && (
-                <div className="mb-4">
-                  <p className="text-[10px] md:text-xs font-bold text-[#D4AF37] uppercase tracking-wider mb-2">User Queue</p>
-                  <div className="space-y-2">
-                     {queue.map((qSong, idx) => (
-                        <div 
-                          key={idx} 
-                          onClick={() => {
-                            setQueue(queue.slice(idx + 1));
-                            playSong(qSong, true, contextQueue);
-                          }}
-                          className="flex justify-between items-center group bg-gray-900/40 p-2 rounded-lg hover:bg-gray-800 transition cursor-pointer"
-                        >
-                           <div className="overflow-hidden flex-1 pr-2 pointer-events-none">
-                              <p className="text-white text-xs md:text-sm font-bold truncate">{qSong.title}</p>
-                              <p className="text-gray-400 text-[10px] md:text-xs truncate">{qSong.artists.join(", ")}</p>
-                           </div>
-                           <button onClick={(e) => { 
-                               e.stopPropagation(); 
-                               const nQ = queue.filter((_, i) => i !== idx);
-                               setQueue(nQ); 
-                               syncSettings({ queue: nQ });
-                           }} className="text-gray-400 hover:text-red-500 transition p-2 z-10 bg-gray-800/50 rounded-full md:bg-transparent opacity-100 md:opacity-0 md:group-hover:opacity-100"><Trash2 size={16}/></button>
-                        </div>
-                     ))}
-                  </div>
+          <>
+             <div className="fixed inset-0 z-[55] cursor-default" onClick={(e) => { e.stopPropagation(); setShowQueue(false); }} />
+             <div className="absolute bottom-20 md:bottom-28 right-2 md:right-8 w-[calc(100%-16px)] md:w-96 max-h-[400px] md:max-h-[500px] bg-[#0a0a0a]/95 backdrop-blur-3xl border border-gray-800 rounded-2xl z-[60] p-4 md:p-6 overflow-y-auto shadow-[0_0_40px_rgba(0,0,0,0.9)]">
+                <div className="flex justify-between items-center mb-4 border-b border-gray-800 pb-2">
+                   <h3 className="text-base md:text-lg font-bold text-white flex items-center gap-2"><Activity size={18} className="text-[#00E5FF]"/> Up Next</h3>
+                   <button onClick={() => setShowQueue(false)} className="md:hidden text-gray-400"><X size={20}/></button>
                 </div>
-             )}
+                
+                {queue.length > 0 && (
+                   <div className="mb-4">
+                     <p className="text-[10px] md:text-xs font-bold text-[#D4AF37] uppercase tracking-wider mb-2">User Queue</p>
+                     <div className="space-y-2">
+                        {queue.map((qSong, idx) => (
+                           <div 
+                             key={idx} 
+                             onClick={() => {
+                               setQueue(queue.slice(idx + 1));
+                               playSong(qSong, true, contextQueue);
+                             }}
+                             className="flex justify-between items-center group bg-gray-900/40 p-2 rounded-lg hover:bg-gray-800 transition cursor-pointer"
+                           >
+                              <div className="overflow-hidden flex-1 pr-2 pointer-events-none">
+                                 <p className="text-white text-xs md:text-sm font-bold truncate">{qSong.title}</p>
+                                 <p className="text-gray-400 text-[10px] md:text-xs truncate">{qSong.artists.join(", ")}</p>
+                              </div>
+                              <button onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  const nQ = queue.filter((_, i) => i !== idx);
+                                  setQueue(nQ); 
+                                  syncSettings({ queue: nQ });
+                              }} className="text-gray-400 hover:text-red-500 transition p-2 z-10 bg-gray-800/50 rounded-full md:bg-transparent opacity-100 md:opacity-0 md:group-hover:opacity-100"><Trash2 size={16}/></button>
+                           </div>
+                        ))}
+                     </div>
+                   </div>
+                )}
 
-             {autoQueue.length > 0 ? (
-                <div>
-                  <p className="text-[10px] md:text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Auto-Play Selection</p>
-                  <div className="space-y-2 opacity-80">
-                     {autoQueue.map((aSong: any, idx: number) => (
-                        <div 
-                          key={idx} 
-                          onClick={() => playSong(aSong, true, contextQueue)}
-                          className="flex justify-between items-center bg-gray-900/20 hover:bg-gray-800/50 p-2 rounded-lg cursor-pointer transition"
-                        >
-                           <div className="overflow-hidden flex-1 pr-2 pointer-events-none">
-                              <p className="text-gray-300 text-xs md:text-sm font-semibold truncate">{aSong.title}</p>
-                              <p className="text-gray-500 text-[10px] md:text-xs truncate">{aSong.artists.join(", ")}</p>
+                {autoQueue.length > 0 ? (
+                   <div>
+                     <p className="text-[10px] md:text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Auto-Play Selection</p>
+                     <div className="space-y-2 opacity-80">
+                        {autoQueue.map((aSong: any, idx: number) => (
+                           <div 
+                             key={idx} 
+                             onClick={() => playSong(aSong, true, contextQueue)}
+                             className="flex justify-between items-center bg-gray-900/20 hover:bg-gray-800/50 p-2 rounded-lg cursor-pointer transition"
+                           >
+                              <div className="overflow-hidden flex-1 pr-2 pointer-events-none">
+                                 <p className="text-gray-300 text-xs md:text-sm font-semibold truncate">{aSong.title}</p>
+                                 <p className="text-gray-500 text-[10px] md:text-xs truncate">{aSong.artists.join(", ")}</p>
+                              </div>
                            </div>
-                        </div>
-                     ))}
-                  </div>
-                </div>
-             ) : (
-                queue.length === 0 && <p className="text-gray-500 text-xs md:text-sm text-center py-4">Engine Queue is empty.</p>
-             )}
-          </div>
+                        ))}
+                     </div>
+                   </div>
+                ) : (
+                   queue.length === 0 && <p className="text-gray-500 text-xs md:text-sm text-center py-4">Engine Queue is empty.</p>
+                )}
+             </div>
+          </>
         )}
       </div>
 

@@ -12,8 +12,9 @@ pub struct AppState {
 }
 
 #[tauri::command]
-fn update_discord_status(state: State<AppState>, song: String, artist: String) {
-    println!("DEBUG: Received {} by {}", song, artist);
+// FIX: Renamed variables to simple words to bypass Tauri's strict casing rules
+fn update_discord_status(state: State<AppState>, song: String, artist: String, thumbnail: String, start: i64, end: i64) {
+    println!("DEBUG: Received {} by {} | Image: {}", song, artist, thumbnail);
     let mut drpc_guard = state.drpc.lock().unwrap();
     
     // 1. If client is missing, start it
@@ -21,7 +22,6 @@ fn update_discord_status(state: State<AppState>, song: String, artist: String) {
         let mut client = DiscordClient::new(1479476213637709845);
         client.start();
         
-        // CRITICAL FIX: Give Discord 1 second to connect
         thread::sleep(Duration::from_millis(1000)); 
         
         *drpc_guard = Some(client);
@@ -30,18 +30,25 @@ fn update_discord_status(state: State<AppState>, song: String, artist: String) {
     
     // 2. Try to update status
     if let Some(client) = drpc_guard.as_mut() {
+        let large_img = if thumbnail.starts_with("http") { thumbnail.clone() } else { "r-logo".to_string() };
+
         let res = client.set_activity(|act| {
             act.state(artist)
-               .details(song)
-               .assets(|a| a.large_image("r-logo").large_text("R Industries Music Line"))
+               .details(song.clone())
+               .assets(|a| {
+                   a.large_image(large_img.as_str())
+                    .large_text(song.as_str())
+                    .small_image("r-logo")
+                    .small_text("R Industries Music Line")
+               })
+               // Passes the clean start and end variables
+               .timestamps(|t| t.start(start as u64).end(end as u64))
         });
         
         match res {
             Ok(_) => println!("DEBUG: Discord Update Successful!"),
-            // 3. If it fails with "Not Started", it needs a bit more time
             Err(e) => {
                 println!("DEBUG: Discord Update Failed: {:?}. Retrying in 2s...", e);
-                // Background thread so the app doesn't freeze
                 thread::sleep(Duration::from_millis(2000));
             }
         }
