@@ -3,101 +3,101 @@ import { useEffect, useState, useRef } from "react";
 import { supabase } from "../utils/supabase";
 import { useRouter } from "next/navigation";
 import { 
-  HomeIcon, Search, Library, Settings, LogOut, ShieldAlert, X, 
-  Shuffle, Repeat, Repeat1, Play, Pause, SkipBack, SkipForward, Volume2, Clock, Users,
-  MoreVertical, Heart, ListPlus, ListMusic, Ban, Plus, Mic2, UserPlus, Trash2, Activity, List, ChevronDown,
-  History as HistoryIcon, MonitorSpeaker
+ HomeIcon, Search, Library, Settings, LogOut, ShieldAlert, X, 
+ Shuffle, Repeat, Repeat1, Play, Pause, SkipBack, SkipForward, Volume2, Clock, Users,
+ MoreVertical, Heart, ListPlus, ListMusic, Ban, Plus, Mic2, UserPlus, Trash2, Activity, List, ChevronDown,
+ History as HistoryIcon, MonitorSpeaker
 } from "lucide-react";
 import { invoke } from '@tauri-apps/api/core';
 
 export default function Home() {
-  const [user, setUser] = useState<any>(null);
-  const [profile, setProfile] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const router = useRouter();
+ const [user, setUser] = useState<any>(null);
+ const [profile, setProfile] = useState<any>(null);
+ const [loading, setLoading] = useState(true);
+ const router = useRouter();
   
-  const [activeTab, setActiveTab] = useState("home");
-  const [showSettings, setShowSettings] = useState(false);
-  const [activeMenu, setActiveMenu] = useState<string | null>(null);
-  const [showLyrics, setShowLyrics] = useState(false);
-  const [showQueue, setShowQueue] = useState(false);
-  const [viewingPlaylist, setViewingPlaylist] = useState<string | null>(null);
-  const [isMobilePlayerOpen, setIsMobilePlayerOpen] = useState(false);
+ const [activeTab, setActiveTab] = useState("home");
+ const [showSettings, setShowSettings] = useState(false);
+ const [activeMenu, setActiveMenu] = useState<string | null>(null);
+ const [showLyrics, setShowLyrics] = useState(false);
+ const [showQueue, setShowQueue] = useState(false);
+ const [viewingPlaylist, setViewingPlaylist] = useState<string | null>(null);
+ const [isMobilePlayerOpen, setIsMobilePlayerOpen] = useState(false);
   
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); 
+ const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); 
 
-  const [recommendations, setRecommendations] = useState<any[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [liveResults, setLiveResults] = useState<any[]>([]);
-  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+ const [recommendations, setRecommendations] = useState<any[]>([]);
+ const [searchQuery, setSearchQuery] = useState("");
+ const [liveResults, setLiveResults] = useState<any[]>([]);
+ const [recentSearches, setRecentSearches] = useState<string[]>([]);
   
-  const [currentSong, setCurrentSong] = useState<any>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [volume, setVolume] = useState(1);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [isShuffle, setIsShuffle] = useState(false);
-  const [repeatMode, setRepeatMode] = useState<0|1|2>(0); 
-  const [playHistory, setPlayHistory] = useState<any[]>([]);
-  const [fadeTime, setFadeTime] = useState(3); 
+ const [currentSong, setCurrentSong] = useState<any>(null);
+ const [isPlaying, setIsPlaying] = useState(false);
+ const [volume, setVolume] = useState(1);
+ const [currentTime, setCurrentTime] = useState(0);
+ const [duration, setDuration] = useState(0);
+ const [isShuffle, setIsShuffle] = useState(false);
+ const [repeatMode, setRepeatMode] = useState<0|1|2>(0); 
+ const [playHistory, setPlayHistory] = useState<any[]>([]);
+ const [fadeTime, setFadeTime] = useState(3); 
   
-  const [lyrics, setLyrics] = useState<string | null>(null);
-  const [parsedLyrics, setParsedLyrics] = useState<{time: number, text: string}[] | null>(null);
-  const [isFetchingLyrics, setIsFetchingLyrics] = useState(false);
-  const [nextAudioCache, setNextAudioCache] = useState<{id: string, url: string} | null>(null);
+ const [lyrics, setLyrics] = useState<string | null>(null);
+ const [parsedLyrics, setParsedLyrics] = useState<{time: number, text: string}[] | null>(null);
+ const [isFetchingLyrics, setIsFetchingLyrics] = useState(false);
+ const [nextAudioCache, setNextAudioCache] = useState<{id: string, url: string} | null>(null);
   
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const phantomRef = useRef<HTMLAudioElement>(null); 
-  const crossfadeFired = useRef(false);
-  const hasLoggedCurrentSong = useRef(false);
-  const isSkippingRef = useRef(false); 
+ const audioRef = useRef<HTMLAudioElement>(null);
+ const phantomRef = useRef<HTMLAudioElement>(null); 
+ const crossfadeFired = useRef(false);
+ const hasLoggedCurrentSong = useRef(false);
+ const isSkippingRef = useRef(false); 
 
-  const [queue, setQueue] = useState<any[]>([]);
-  const [contextQueue, setContextQueue] = useState<any[]>([]);
-  const [likedSongs, setLikedSongs] = useState<any[]>([]);
-  const [playlists, setPlaylists] = useState<Record<string, any[]>>({});
-  const [newPlaylistName, setNewPlaylistName] = useState("");
-  const [renamingPlaylist, setRenamingPlaylist] = useState<string | null>(null);
-  const [newRenameValue, setNewRenameValue] = useState("");
+ const [queue, setQueue] = useState<any[]>([]);
+ const [contextQueue, setContextQueue] = useState<any[]>([]);
+ const [likedSongs, setLikedSongs] = useState<any[]>([]);
+ const [playlists, setPlaylists] = useState<Record<string, any[]>>({});
+ const [newPlaylistName, setNewPlaylistName] = useState("");
+ const [renamingPlaylist, setRenamingPlaylist] = useState<string | null>(null);
+ const [newRenameValue, setNewRenameValue] = useState("");
 
-  const [newPassword, setNewPassword] = useState("");
-  const [passwordMsg, setPasswordMsg] = useState("");
-  const [allUsers, setAllUsers] = useState<any[]>([]);
-  const [newUserEmail, setNewUserEmail] = useState("");
-  const [newUserPass, setNewUserPass] = useState("");
-  const [newUserName, setNewUserName] = useState("");
-  const [addUserMsg, setAddUserMsg] = useState("");
+ const [newPassword, setNewPassword] = useState("");
+ const [passwordMsg, setPasswordMsg] = useState("");
+ const [allUsers, setAllUsers] = useState<any[]>([]);
+ const [newUserEmail, setNewUserEmail] = useState("");
+ const [newUserPass, setNewUserPass] = useState("");
+ const [newUserName, setNewUserName] = useState("");
+ const [addUserMsg, setAddUserMsg] = useState("");
 
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [importUrl, setImportUrl] = useState("");
-  const [isImporting, setIsImporting] = useState(false);
+ const [showImportModal, setShowImportModal] = useState(false);
+ const [importUrl, setImportUrl] = useState("");
+ const [isImporting, setIsImporting] = useState(false);
 
-  const [remoteSession, setRemoteSession] = useState<any>(null);
-  const [deviceId] = useState(() => typeof window !== 'undefined' ? (window.innerWidth < 768 ? 'Mobile' : 'Desktop') : 'Device');
-  const channelRef = useRef<any>(null);
-  const lastBroadcastTime = useRef(0);
+ const [remoteSession, setRemoteSession] = useState<any>(null);
+ const [deviceId] = useState(() => typeof window !== 'undefined' ? (window.innerWidth < 768 ? 'Mobile' : 'Desktop') : 'Device');
+ const channelRef = useRef<any>(null);
+ const lastBroadcastTime = useRef(0);
 
-  const [blocklist, setBlocklist] = useState<string[]>([]);
-  const cloudSettingsRef = useRef<any>({});
-  const discordRpcFired = useRef<string | null>(null);
+ const [blocklist, setBlocklist] = useState<string[]>([]);
+ const cloudSettingsRef = useRef<any>({});
+ const discordRpcFired = useRef<string | null>(null);
 
-  const isAdmin = profile?.role?.toLowerCase()?.trim() === 'admin';
-  const getApiUrl = () => 'https://ariuxwhite-r-stream-engine-pro.hf.space/api';
+ const isAdmin = profile?.role?.toLowerCase()?.trim() === 'admin';
+ const getApiUrl = () => 'https://ariuxwhite-r-stream-engine-pro.hf.space/api';
 
-  const decodeHtml = (text: string) => {
+ const decodeHtml = (text: string) => {
     if (typeof document === 'undefined') return text;
     const txt = document.createElement("textarea");
     txt.innerHTML = text;
     return txt.value;
-  };
+ };
 
-  const syncSettings = (newSettings: any) => {
+ const syncSettings = (newSettings: any) => {
       if (!user?.id) return;
       cloudSettingsRef.current = { ...cloudSettingsRef.current, ...newSettings };
       supabase.from('user_library').update({ playback_settings: cloudSettingsRef.current }).eq('user_id', user.id).then();
-  };
+ };
 
-  useEffect(() => {
+ useEffect(() => {
     const fetchSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
@@ -185,9 +185,24 @@ export default function Home() {
     fetchSession();
 
     return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); }
-  }, [router, deviceId]);
+ }, [router, deviceId]);
 
-  useEffect(() => {
+ // THE MOBILE BACKGROUND FIX: Prevents mobile browsers from killing the audio thread when locked
+ useEffect(() => {
+    const preventSleep = () => {
+      if (isPlaying && audioRef.current) {
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = 'playing';
+          navigator.mediaSession.setActionHandler('play', () => audioRef.current?.play());
+          navigator.mediaSession.setActionHandler('pause', () => audioRef.current?.pause());
+        }
+      }
+    };
+    const interval = setInterval(preventSleep, 1000);
+    return () => clearInterval(interval);
+ }, [isPlaying]);
+
+ useEffect(() => {
     if (channelRef.current && currentSong) {
        channelRef.current.send({
           type: 'broadcast',
@@ -195,9 +210,9 @@ export default function Home() {
           payload: { deviceId, song: currentSong, isPlaying, currentTime, duration }
        });
     }
-  }, [isPlaying]);
+ }, [isPlaying]);
 
-  useEffect(() => {
+ useEffect(() => {
     if (searchQuery.length < 2) { setLiveResults([]); return; }
     const delay = setTimeout(async () => {
       try {
@@ -206,10 +221,10 @@ export default function Home() {
         setLiveResults(data.map((s: any) => ({...s, title: decodeHtml(s.title)})));
       } catch (e) { console.error(e); }
     }, 400);
-    return () => clearTimeout(delay);
-  }, [searchQuery]);
+    return () => delay && clearTimeout(delay);
+ }, [searchQuery]);
 
-  useEffect(() => {
+ useEffect(() => {
     if (currentSong && showLyrics) {
       setIsFetchingLyrics(true);
       setLyrics(null);
@@ -246,9 +261,9 @@ export default function Home() {
           setIsFetchingLyrics(false);
         });
     }
-  }, [currentSong, showLyrics]);
+ }, [currentSong, showLyrics]);
 
-  const handleNavClick = (tab: string) => {
+ const handleNavClick = (tab: string) => {
     setActiveTab(tab);
     setShowSettings(false);
     setViewingPlaylist(null);
@@ -256,14 +271,14 @@ export default function Home() {
     setIsMobilePlayerOpen(false);
     setShowQueue(false);
     setIsMobileMenuOpen(false);
-  };
+ };
 
-  const getHighRes = (url: string) => {
+ const getHighRes = (url: string) => {
     if (!url || url.trim() === "") return '/r-logo.jpg';
     return url.replace(/w\d+-h\d+/g, 'w1080-h1080');
-  };
+ };
 
-  const prefetchNext = (currentList: any[], currentVideoId: string) => {
+ const prefetchNext = (currentList: any[], currentVideoId: string) => {
     let nextIndex = isShuffle ? Math.floor(Math.random() * currentList.length) : currentList.findIndex(s => s.videoId === currentVideoId) + 1;
     if (nextIndex >= currentList.length) nextIndex = 0;
     const nextSong = currentList[nextIndex];
@@ -273,17 +288,17 @@ export default function Home() {
         .then(data => setNextAudioCache({ id: nextSong.videoId, url: data.url }))
         .catch(console.error);
     }
-  };
+ };
 
-  const changeVolume = (newVol: number) => {
+ const changeVolume = (newVol: number) => {
     if (newVol > 1) newVol = 1;
     if (newVol < 0) newVol = 0;
     setVolume(newVol);
     syncSettings({ volume: newVol });
     if (audioRef.current) audioRef.current.volume = newVol;
-  };
+ };
 
-  const handleBlockSong = async (song: any) => {
+ const handleBlockSong = async (song: any) => {
     if (!user) return;
     
     setBlocklist(prev => [...prev, song.videoId]);
@@ -300,9 +315,9 @@ export default function Home() {
     });
     
     await supabase.from('user_blocklist').insert([{ user_id: user.id, video_id: song.videoId }]);
-  };
+ };
 
-  const playSong = async (song: any, addToHistory = true, sourceList: any[] | null = null) => {
+ const playSong = async (song: any, addToHistory = true, sourceList: any[] | null = null) => {
     crossfadeFired.current = true; 
     hasLoggedCurrentSong.current = false; 
     
@@ -374,9 +389,9 @@ export default function Home() {
       console.error(error);
       setCurrentSong(null);
     }
-  };
+ };
 
-  const handleTakeover = () => {
+ const handleTakeover = () => {
       if (!remoteSession) return;
       channelRef.current?.send({ type: 'broadcast', event: 'takeover', payload: { targetDeviceId: remoteSession.deviceId } });
       const songToPlay = remoteSession.song;
@@ -391,9 +406,9 @@ export default function Home() {
               }
           }, 300); 
       });
-  };
+ };
 
-  const togglePlayPause = () => {
+ const togglePlayPause = () => {
     if (audioRef.current) {
       if (isPlaying) {
         audioRef.current.pause();
@@ -413,9 +428,9 @@ export default function Home() {
         }
       }
     }
-  };
+ };
 
-  const handleNext = async () => {
+ const handleNext = async () => {
     if (isSkippingRef.current) return;
     isSkippingRef.current = true;
     
@@ -481,9 +496,9 @@ export default function Home() {
     
     playSong(contextQueue[nextIndex], true, contextQueue);
     unlock();
-  };
+ };
 
-  const handleBack = () => {
+ const handleBack = () => {
     if (!audioRef.current) return;
     if (audioRef.current.currentTime > 3) {
       audioRef.current.currentTime = 0;
@@ -494,9 +509,9 @@ export default function Home() {
       setPlayHistory(newHistory);
       if (prevSong) playSong(prevSong, false, contextQueue);
     }
-  };
+ };
 
-  useEffect(() => {
+ useEffect(() => {
     if ('mediaSession' in navigator && currentSong) {
       const artistString = currentSong.artists.join(", ");
       navigator.mediaSession.metadata = new MediaMetadata({
@@ -506,9 +521,9 @@ export default function Home() {
         artwork: [{ src: currentSong.highResThumb || getHighRes(currentSong.thumbnail), sizes: '512x512', type: 'image/jpeg' }]
       });
     }
-  }, [currentSong?.videoId]); 
+ }, [currentSong?.videoId]); 
 
-  useEffect(() => {
+ useEffect(() => {
     if ('mediaSession' in navigator) {
       navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
       navigator.mediaSession.setActionHandler('play', togglePlayPause);
@@ -516,9 +531,9 @@ export default function Home() {
       navigator.mediaSession.setActionHandler('nexttrack', handleNext);
       navigator.mediaSession.setActionHandler('previoustrack', handleBack);
     }
-  }, [isPlaying, handleNext, handleBack]);
+ }, [isPlaying, handleNext, handleBack]);
 
-  const handleTimeUpdate = (e: any) => {
+ const handleTimeUpdate = (e: any) => {
     const ct = e.currentTarget.currentTime;
     const dur = e.currentTarget.duration;
     setCurrentTime(ct);
@@ -543,9 +558,8 @@ export default function Home() {
             } catch (err) {}
         }
     } else if (!isPlaying) {
-        // Tell Rust to clear Discord when paused
         invoke('clear_discord_status');
-        discordRpcFired.current = null; // Reset so it fires again on resume
+        discordRpcFired.current = null; 
     }
 
     if (isPlaying && (ct - lastBroadcastTime.current > 1 || ct < lastBroadcastTime.current)) {
@@ -614,47 +628,47 @@ export default function Home() {
     } else {
         if (audioRef.current) audioRef.current.volume = volume;
     }
-  };
+ };
 
-  const formatTime = (t: number) => {
+ const formatTime = (t: number) => {
     if (!t || isNaN(t)) return "0:00";
     const m = Math.floor(t / 60);
     const s = Math.floor(t % 60);
     return `${m}:${s.toString().padStart(2, '0')}`;
-  };
+ };
 
-  const handleLike = (song: any) => {
+ const handleLike = (song: any) => {
     const exists = likedSongs.find(s => s.videoId === song.videoId);
     const updated = exists ? likedSongs.filter(s => s.videoId !== song.videoId) : [...likedSongs, song];
     setLikedSongs(updated);
     if (user) supabase.from('user_library').update({ liked_songs: updated }).eq('user_id', user.id).then();
-  };
+ };
 
-  const handleAddToPlaylist = (song: any, pName: string) => {
+ const handleAddToPlaylist = (song: any, pName: string) => {
     const list = playlists[pName] || [];
     if (!list.find((s: any) => s.videoId === song.videoId)) {
       const updated = { ...playlists, [pName]: [...list, song] };
       setPlaylists(updated);
       if (user) supabase.from('user_library').update({ playlists: updated }).eq('user_id', user.id).then();
     }
-  };
+ };
 
-  const deletePlaylist = (pName: string) => {
+ const deletePlaylist = (pName: string) => {
     if (!confirm(`Are you sure you want to delete "${pName}"? This action is permanent.`)) return;
     const { [pName]: removed, ...rest } = playlists;
     setPlaylists(rest);
     if (user) supabase.from('user_library').update({ playlists: rest }).eq('user_id', user.id).then();
     setViewingPlaylist(null);
-  };
+ };
 
-  const removeSongFromPlaylist = (videoId: string, pName: string) => {
+ const removeSongFromPlaylist = (videoId: string, pName: string) => {
     const updatedList = playlists[pName].filter((s: any) => s.videoId !== videoId);
     const updatedPlaylists = { ...playlists, [pName]: updatedList };
     setPlaylists(updatedPlaylists);
     if (user) supabase.from('user_library').update({ playlists: updatedPlaylists }).eq('user_id', user.id).then();
-  };
+ };
 
-  const handleRenamePlaylist = (e: React.FormEvent) => {
+ const handleRenamePlaylist = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRenameValue || newRenameValue === viewingPlaylist || !viewingPlaylist) return;
     const updated = { ...playlists };
@@ -664,18 +678,18 @@ export default function Home() {
     if (user) supabase.from('user_library').update({ playlists: updated }).eq('user_id', user.id).then();
     setViewingPlaylist(newRenameValue);
     setRenamingPlaylist(null);
-  };
+ };
 
-  const createPlaylist = (e: React.FormEvent) => {
+ const createPlaylist = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPlaylistName) return;
     const updated = { ...playlists, [newPlaylistName]: [] };
     setPlaylists(updated);
     if (user) supabase.from('user_library').update({ playlists: updated }).eq('user_id', user.id).then();
     setNewPlaylistName("");
-  };
+ };
 
-  const handleImportPlaylist = async (e: React.FormEvent) => {
+ const handleImportPlaylist = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!importUrl) return;
     setIsImporting(true);
@@ -707,18 +721,18 @@ export default function Home() {
         alert("Failed to connect to the import engine.");
     }
     setIsImporting(false);
-  };
+ };
 
-  const toggleUserRole = async (targetId: string, currentRole: string) => {
+ const toggleUserRole = async (targetId: string, currentRole: string) => {
     const newRole = currentRole?.toLowerCase() === 'admin' ? 'user' : 'admin';
     const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', targetId);
     if (!error) {
       const { data } = await supabase.from('profiles').select('*');
       if (data) setAllUsers(data);
     }
-  };
+ };
 
-  const handleAddUser = async (e: React.FormEvent) => {
+ const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setAddUserMsg("Initializing new neural link...");
     const { data, error } = await supabase.auth.signUp({
@@ -736,20 +750,20 @@ export default function Home() {
        const { data: usersData } = await supabase.from('profiles').select('*');
        if (usersData) setAllUsers(usersData);
     }
-  };
+ };
 
-  if (loading || !user) return null;
+ if (loading || !user) return null;
 
-  const isRemoteActive = !isPlaying && remoteSession?.isPlaying && remoteSession?.deviceId !== deviceId;
-  const displaySong = isRemoteActive ? remoteSession.song : currentSong;
-  const displayTime = isRemoteActive ? remoteSession.currentTime : currentTime;
-  const displayDuration = isRemoteActive ? remoteSession.duration : duration;
+ const isRemoteActive = !isPlaying && remoteSession?.isPlaying && remoteSession?.deviceId !== deviceId;
+ const displaySong = isRemoteActive ? remoteSession.song : currentSong;
+ const displayTime = isRemoteActive ? remoteSession.currentTime : currentTime;
+ const displayDuration = isRemoteActive ? remoteSession.duration : duration;
 
-  const displayListenAgain = playHistory.slice(0, 10);
-  const activeIdx = currentSong ? contextQueue.findIndex((s:any) => s.videoId === currentSong?.videoId) : -1;
-  const autoQueue = activeIdx !== -1 && activeIdx < contextQueue.length - 1 ? contextQueue.slice(activeIdx + 1, activeIdx + 21) : [];
+ const displayListenAgain = playHistory.slice(0, 10);
+ const activeIdx = currentSong ? contextQueue.findIndex((s:any) => s.videoId === currentSong?.videoId) : -1;
+ const autoQueue = activeIdx !== -1 && activeIdx < contextQueue.length - 1 ? contextQueue.slice(activeIdx + 1, activeIdx + 21) : [];
 
-  const renderSongCard = (song: any, currentList: any[] | null) => (
+ const renderSongCard = (song: any, currentList: any[] | null) => (
     <div key={song.videoId} className={`bg-gray-900/40 hover:bg-gray-800/80 p-4 rounded-2xl transition group border border-gray-800/50 hover:border-gray-600 backdrop-blur-sm relative ${activeMenu === song.videoId ? 'z-[50]' : ''}`}>
       <div className="relative mb-4 aspect-square cursor-pointer" onClick={() => playSong(song, true, currentList)}>
         <img src={getHighRes(song.thumbnail)} alt="cover" className="w-full h-full object-cover rounded-xl shadow-lg" />
@@ -810,9 +824,9 @@ export default function Home() {
         </div>
       )}
     </div>
-  );
+ );
 
-  return (
+ return (
     <div className="flex flex-col h-screen text-white relative overflow-hidden bg-[#050505]">
       
       <div className="absolute inset-0 z-0 pointer-events-none">
@@ -1268,28 +1282,28 @@ export default function Home() {
           )}
           
           {/* IMPORT PLAYLIST MODAL OVERLAY */}
-{showImportModal && (
-  <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-      <div className="bg-gray-900 border border-gray-700 p-6 md:p-8 rounded-3xl w-full max-w-lg shadow-2xl relative">
-          <button onClick={() => {setShowImportModal(false); setImportUrl("");}} className="absolute top-4 right-4 md:top-6 md:right-6 text-gray-400 hover:text-white transition"><X size={24}/></button>
-          <h3 className="text-xl md:text-2xl font-bold mb-2 text-white flex items-center gap-2"><ListPlus className="text-[#00E5FF]"/> Import Data</h3>
-          
-          <p className="text-gray-400 text-xs md:text-sm mb-6">
-              Paste a YouTube or YouTube Music playlist link below.<br/><br/>
-              <span className="text-[#D4AF37] font-semibold tracking-wide">
-                  To import from Spotify, please use a free converter like TuneMyMusic.com to generate a YouTube link first.
-              </span>
-          </p>
+          {showImportModal && (
+            <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+                <div className="bg-gray-900 border border-gray-700 p-6 md:p-8 rounded-3xl w-full max-w-lg shadow-2xl relative">
+                    <button onClick={() => {setShowImportModal(false); setImportUrl("");}} className="absolute top-4 right-4 md:top-6 md:right-6 text-gray-400 hover:text-white transition"><X size={24}/></button>
+                    <h3 className="text-xl md:text-2xl font-bold mb-2 text-white flex items-center gap-2"><ListPlus className="text-[#00E5FF]"/> Import Data</h3>
+                    
+                    <p className="text-gray-400 text-xs md:text-sm mb-6">
+                        Paste a YouTube or YouTube Music playlist link below.<br/><br/>
+                        <span className="text-[#D4AF37] font-semibold tracking-wide">
+                            To import from Spotify, please use a free converter like TuneMyMusic.com to generate a YouTube link first.
+                        </span>
+                    </p>
 
-          <form onSubmit={handleImportPlaylist} className="flex flex-col gap-4">
-              <input type="text" value={importUrl} onChange={(e)=>setImportUrl(e.target.value)} placeholder="e.g., https://music.youtube.com/playlist?list=..." className="w-full bg-black border border-gray-600 rounded-xl px-4 py-3 focus:outline-none focus:border-[#00E5FF] text-white text-sm md:text-base" required />
-              <button type="submit" disabled={isImporting} className="w-full bg-[#00E5FF] text-black font-extrabold rounded-xl py-3 md:py-4 hover:bg-cyan-400 transition tracking-widest uppercase disabled:opacity-50 shadow-[0_0_15px_rgba(0,229,255,0.3)] text-xs md:text-base">
-                  {isImporting ? "Extracting Neural Data..." : "Initialize Import"}
-              </button>
-          </form>
-      </div>
-  </div>
-)}
+                    <form onSubmit={handleImportPlaylist} className="flex flex-col gap-4">
+                        <input type="text" value={importUrl} onChange={(e)=>setImportUrl(e.target.value)} placeholder="e.g., https://music.youtube.com/playlist?list=..." className="w-full bg-black border border-gray-600 rounded-xl px-4 py-3 focus:outline-none focus:border-[#00E5FF] text-white text-sm md:text-base" required />
+                        <button type="submit" disabled={isImporting} className="w-full bg-[#00E5FF] text-black font-extrabold rounded-xl py-3 md:py-4 hover:bg-cyan-400 transition tracking-widest uppercase disabled:opacity-50 shadow-[0_0_15px_rgba(0,229,255,0.3)] text-xs md:text-base">
+                            {isImporting ? "Extracting Neural Data..." : "Initialize Import"}
+                        </button>
+                    </form>
+                </div>
+            </div>
+          )}
         </div>
         
         {/* SYNced NEON LYRICS PANEL */}
@@ -1669,5 +1683,5 @@ export default function Home() {
       )}
 
     </div>
-  );
+ );
 }
