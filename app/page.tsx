@@ -51,7 +51,7 @@ export default function Home() {
   const crossfadeFired = useRef(false);
   const hasLoggedCurrentSong = useRef(false);
   const isSkippingRef = useRef(false); 
-  const lastRenderTime = useRef(0); // Added for FPS Throttling
+  const lastRenderTime = useRef(0);
 
   const [queue, setQueue] = useState<any[]>([]);
   const [contextQueue, setContextQueue] = useState<any[]>([]);
@@ -147,7 +147,7 @@ export default function Home() {
                 title: decodeHtml(h.title),
                 artists: [h.artist],
                 thumbnail: h.cover_url,
-                playedAt: h.played_at || new Date().toISOString() // Grab the timestamp!
+                playedAt: h.played_at || new Date().toISOString()
             }));
             const uniqueHistory = formattedHistory.filter((v,i,a)=>a.findIndex(t=>(t.videoId === v.videoId))===i);
             setPlayHistory(uniqueHistory);
@@ -189,7 +189,6 @@ export default function Home() {
     return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); }
   }, [router, deviceId]);
 
-  // THE MOBILE BACKGROUND FIX: Prevents mobile browsers from killing the audio thread when locked
   useEffect(() => {
     const preventSleep = () => {
       if (isPlaying && audioRef.current) {
@@ -323,7 +322,6 @@ export default function Home() {
     crossfadeFired.current = true; 
     hasLoggedCurrentSong.current = false; 
 
-    // Instant Mobile Lock Fix: Play cached song immediately before React state updates
     let playedFromCache = false;
     let activeUrl = "";
     
@@ -359,22 +357,29 @@ export default function Home() {
     }
     syncSettings({ currentSong: cleanSong });
 
-    // Exit early if played from cache
+    // BACKGROUND AUTO-FETCH: Ensure the queue never runs out while screen is locked
+    const currentQueueIdx = initialQueue.findIndex(s => s.videoId === song.videoId);
+    if (currentQueueIdx >= initialQueue.length - 3) {
+        fetch(`${getApiUrl()}/radio?video_id=${song.videoId}&blocked_ids=${blocklist.join(',')}`)
+        .then(r=>r.json()).then(data => {
+            if (!data.error && Array.isArray(data)) {
+                const decodedRadio = data.map((d: any) => ({...d, title: decodeHtml(d.title)}));
+                setContextQueue(prev => {
+                    const newRadioSongs = decodedRadio.filter((d:any) => !prev.find((c:any) => c.videoId === d.videoId));
+                    if (newRadioSongs.length > 0) {
+                        const updatedQueue = [...prev, ...newRadioSongs];
+                        syncSettings({ contextQueue: updatedQueue });
+                        return updatedQueue;
+                    }
+                    return prev;
+                });
+            }
+        }).catch(()=>{});
+    }
+
     if (playedFromCache) {
         prefetchNext(initialQueue, song.videoId);
         return; 
-    }
-
-    if (!sourceList) {
-       fetch(`${getApiUrl()}/radio?video_id=${song.videoId}&blocked_ids=${blocklist.join(',')}`)
-       .then(r=>r.json()).then(data => { 
-           if (!data.error && Array.isArray(data)) {
-               const decodedRadio = data.map((d: any) => ({...d, title: decodeHtml(d.title)}));
-               const combinedQueue = [cleanSong, ...decodedRadio.filter((d:any) => d.videoId !== song.videoId)];
-               setContextQueue(combinedQueue);
-               syncSettings({ contextQueue: combinedQueue });
-           }
-       }).catch(console.error);
     }
 
     try {
@@ -456,54 +461,70 @@ export default function Home() {
       return;
     }
     
+    let nextSongToPlay = null;
+    let isFromUserQueue = false;
+
     if (queue.length > 0) {
-      const nextSong = queue[0];
-      const newQ = queue.slice(1);
-      setQueue(newQ);
-      syncSettings({ queue: newQ });
-      playSong(nextSong, true, contextQueue); 
-      unlock();
-      return;
-    }
-    
-    if (!currentSong || contextQueue.length === 0) {
-      setIsPlaying(false);
-      unlock();
-      return;
-    }
-    
-    let nextIndex = isShuffle ? Math.floor(Math.random() * contextQueue.length) : contextQueue.findIndex((s:any) => s.videoId === currentSong.videoId) + 1;
-    
-    if (nextIndex >= contextQueue.length || nextIndex === 0) {
-      try {
-          const r = await fetch(`${getApiUrl()}/radio?video_id=${currentSong.videoId}&blocked_ids=${blocklist.join(',')}`);
-          const data = await r.json();
-          if (!data.error && Array.isArray(data) && data.length > 0) {
-              const decodedRadio = data.map((d: any) => ({...d, title: decodeHtml(d.title)}));
-              const newRadioSongs = decodedRadio.filter((d:any) => !contextQueue.find((c:any) => c.videoId === d.videoId));
-              const newQueue = [...contextQueue, ...newRadioSongs];
-              
-              setContextQueue(newQueue);
-              syncSettings({ contextQueue: newQueue });
-              
-              const nextFromRadio = newQueue[contextQueue.length];
-              if (nextFromRadio) {
-                  playSong(nextFromRadio, true, newQueue);
-                  unlock();
-                  return;
-              }
-          }
-      } catch (e) {}
-      
-      if (repeatMode === 0) {
+      nextSongToPlay = queue[0];
+      isFromUserQueue = true;
+    } else {
+      if (!currentSong || contextQueue.length === 0) {
         setIsPlaying(false);
         unlock();
         return;
       }
-      nextIndex = 0;
+      
+      let nextIndex = isShuffle ? Math.floor(Math.random() * contextQueue.length) : contextQueue.findIndex((s:any) => s.videoId === currentSong.videoId) + 1;
+      
+      if (nextIndex >= contextQueue.length || nextIndex === 0) {
+        // Fallback fetch in case background auto-fetch failed
+        try {
+            const r = await fetch(`${getApiUrl()}/radio?video_id=${currentSong.videoId}&blocked_ids=${blocklist.join(',')}`);
+            const data = await r.json();
+            if (!data.error && Array.isArray(data) && data.length > 0) {
+                const decodedRadio = data.map((d: any) => ({...d, title: decodeHtml(d.title)}));
+                const newRadioSongs = decodedRadio.filter((d:any) => !contextQueue.find((c:any) => c.videoId === d.videoId));
+                const newQueue = [...contextQueue, ...newRadioSongs];
+                setContextQueue(newQueue);
+                syncSettings({ contextQueue: newQueue });
+                nextSongToPlay = newQueue[contextQueue.length];
+            }
+        } catch (e) {}
+        
+        if (!nextSongToPlay) {
+            if (repeatMode === 0) {
+              setIsPlaying(false);
+              unlock();
+              return;
+            }
+            nextIndex = 0;
+            nextSongToPlay = contextQueue[nextIndex];
+        }
+      } else {
+          nextSongToPlay = contextQueue[nextIndex];
+      }
+    }
+
+    // --- CRITICAL MOBILE SYNC PLAY FIX ---
+    // If the browser is locked, we MUST assign the URL and hit play instantly
+    // before any React state yielding happens.
+    if (nextSongToPlay && nextAudioCache && nextAudioCache.id === nextSongToPlay.videoId) {
+        if (audioRef.current) {
+            audioRef.current.src = nextAudioCache.url;
+            audioRef.current.volume = volume;
+            const playPromise = audioRef.current.play();
+            if (playPromise !== undefined) { playPromise.catch(()=>{}); }
+            setIsPlaying(true);
+        }
+    }
+
+    if (isFromUserQueue) {
+      const newQ = queue.slice(1);
+      setQueue(newQ);
+      syncSettings({ queue: newQ });
     }
     
-    playSong(contextQueue[nextIndex], true, contextQueue);
+    playSong(nextSongToPlay, true, contextQueue);
     unlock();
   };
 
@@ -546,7 +567,6 @@ export default function Home() {
     const ct = e.currentTarget.currentTime;
     const dur = e.currentTarget.duration;
     
-    // FPS Throttling: Only update React state once per second
     if (Math.abs(ct - lastRenderTime.current) >= 1 || ct === 0 || ct === dur) {
         setCurrentTime(ct);
         setDuration(dur);
@@ -713,8 +733,9 @@ export default function Home() {
             const urlObj = new URL(importUrl);
             listId = urlObj.searchParams.get("list") || importUrl;
         } catch(e) {} 
-        
-        const res = await fetch(`${getApiUrl()}/playlist?playlist_id=${listId}`);
+
+        // Sending BOTH url and playlist_id to support updated backend configurations safely
+        const res = await fetch(`${getApiUrl()}/playlist?url=${encodeURIComponent(importUrl)}&playlist_id=${listId}`);
         const data = await res.json();
         if (data.error) {
             alert("Import failed: " + data.error);
@@ -777,7 +798,6 @@ export default function Home() {
   const activeIdx = currentSong ? contextQueue.findIndex((s:any) => s.videoId === currentSong?.videoId) : -1;
   const autoQueue = activeIdx !== -1 && activeIdx < contextQueue.length - 1 ? contextQueue.slice(activeIdx + 1, activeIdx + 21) : [];
 
-  // THE MUSIC DIARY GROUPING ALGORITHM
   const groupHistoryByDate = (history: any[]) => {
     const groups: { label: string, songs: any[] }[] = [];
     const labelMap = new Map<string, number>();
@@ -796,7 +816,6 @@ export default function Home() {
         } else if (date.toDateString() === yesterday.toDateString()) {
             dateString = "Yesterday";
         } else {
-            // e.g., "March 15, 2026"
             dateString = date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
         }
 
