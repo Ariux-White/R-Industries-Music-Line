@@ -140,7 +140,7 @@ export default function Home() {
             if (audioRef.current) audioRef.current.src = settings.currentSong.streamUrl;
         }
 
-        const { data: historyData } = await supabase.from('play_history').select('*').eq('user_id', session.user.id).order('played_at', { ascending: false }).limit(40);
+        const { data: historyData } = await supabase.from('play_history').select('*').eq('user_id', session.user.id).order('played_at', { ascending: false }).limit(100);
         if (historyData) {
             const formattedHistory = historyData.map(h => ({
                 videoId: h.video_id,
@@ -353,7 +353,7 @@ export default function Home() {
 
     if (addToHistory && song) {
       setPlayHistory(prev => {
-        const updated = [cleanSong, ...prev].filter((v,i,a)=>a.findIndex(t=>(t.videoId === v.videoId))===i).slice(0, 30);
+        const updated = [cleanSong, ...prev].filter((v,i,a)=>a.findIndex(t=>(t.videoId === v.videoId))===i).slice(0, 100);
         return updated;
       });
     }
