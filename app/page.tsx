@@ -85,7 +85,7 @@ export default function Home() {
 
   const isAdmin = profile?.role?.toLowerCase()?.trim() === 'admin';
  // Development Mode - Pointing to the Sandbox Engine
-const getApiUrl = () => 'https://ariuxwhite-r-stream-engine-pro.hf.space/api'; // <-- DEV URL
+const getApiUrl = () => 'https://r-stream-pro.onrender.com'; // <-- DEV URL
 
   const decodeHtml = (text: string) => {
     if (typeof document === 'undefined') return text;
